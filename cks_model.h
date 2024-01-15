@@ -13,8 +13,6 @@
 #include "io.h"
 #include "cks_cutgenerator.h"
 
-#define EPSILON_TOL 0.00000001
-
 enum ModelStatus {AT_OPTIMUM, STATUS_UNKNOWN};
 
 /***
@@ -70,7 +68,8 @@ protected:
     CKSCutGenerator *cutgen;
 
     bool check_solution();
-    void dfs_to_tag_component(long, long, vector<long>&, vector<bool>&);
+    void fill_solution_vectors();
+    void dfs_to_tag_component(long, long, vector<bool>&);
 
     int save_optimization_status();
 };

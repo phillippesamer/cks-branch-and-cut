@@ -14,7 +14,14 @@ bool SEARCH_ALL_COLOURS_FOR_MSI = false;
 // at most 14 without changing everything to long double (which gurobi ignores)
 bool SET_MAX_PRECISION_IN_SEPARATION = true;
 int  SEPARATION_PRECISION = 14;
-double MSI_VIOLATION_TOL = 1e-10;
+
+// use a tolerance in dealing with relaxation values?
+// e.g. y_u < epsilon instead of y_u == 0
+// set to 0 to stick to exact values and operators
+const double MSI_EPSILON = 1e-5;
+const double MSI_ZERO = MSI_EPSILON;
+const double MSI_ONE = 1.0 - MSI_EPSILON;
+const double INDEGREE_EPSILON = 1e-5;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -283,7 +290,7 @@ bool CKSCutGenerator::separate_indegree(vector<GRBLinExpr> &cuts_lhs,
         {
             long u = instance->graph->s.at(idx);
             long v = instance->graph->t.at(idx);
-            if (x_val[u][colour] > x_val[v][colour] + EPSILON_TOL)
+            if (x_val[u][colour] > x_val[v][colour] + INDEGREE_EPSILON)
                 indegree.at(v) += 1;
             else
                 indegree.at(u) += 1;
@@ -295,7 +302,7 @@ bool CKSCutGenerator::separate_indegree(vector<GRBLinExpr> &cuts_lhs,
             lhs_sum += ( (1 - indegree.at(u)) * x_val[u][colour] );
 
         // 3. FOUND MOST VIOLATED INDEGREE INEQUALITY (IF ANY) IF LHS > 1
-        if (lhs_sum > 1 + EPSILON_TOL)
+        if (lhs_sum > 1 + INDEGREE_EPSILON)
         {
             // store inequality (caller method adds it to the model)
             GRBLinExpr violated_constr = 0;
@@ -592,9 +599,9 @@ bool CKSCutGenerator::separate_minimal_separators(vector<GRBLinExpr> &cuts_lhs,
 
                 long t_in_D = D_idx_of_vertex[t];
 
-                if ( instance->graph->index_matrix[s][t] < 0 &&  // non-adjacent
-                     x_val[s][colour] + x_val[t][colour] > 1 &&  // might cut x*
-                     s_in_D != t_in_D )                        // not contracted
+                if ( instance->graph->index_matrix[s][t] < 0 &&              // non-adjacent
+                     x_val[s][colour] + x_val[t][colour] > 1+MSI_EPSILON &&  // might cut x*
+                     s_in_D != t_in_D )                                      // not contracted
                 {
                     // 3. MAX FLOW COMPUTATION
 
@@ -616,8 +623,7 @@ bool CKSCutGenerator::separate_minimal_separators(vector<GRBLinExpr> &cuts_lhs,
                     // 4. IF THE MIN CUT IS LESS THAN WHAT THE MSI PRESCRIBES
                     // (UP TO A VIOLATION TOLERANCE), WE FOUND A CUT
 
-                    if (mincut < x_val[s][colour] + x_val[t][colour] - 1 
-                                 - MSI_VIOLATION_TOL)
+                    if (mincut < x_val[s][colour] + x_val[t][colour] - 1 - MSI_EPSILON)
                     {
                         // 5. DETERMINE VERTICES IN ORIGINAL GRAPH CORRESPONDING
                         // TO ARCS IN THE MIN CUT

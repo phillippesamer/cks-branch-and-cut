@@ -2,8 +2,9 @@
 
 /// algorithm setup switches
 
-bool CHECK_SOLUTION = true;            // check if the k subgraphs are connected
 bool ORDER_COLOURS_CONSTRAINTS = true; // reduces solution symmetry
+
+const double EPSILON_TOL = 1e-5;
 
 CKSModel::CKSModel(IO *instance)
 {
@@ -205,31 +206,18 @@ bool CKSModel::check_solution()
 {
     /***
      * Depth-first search checking each colour induces a connected subgraph.
-     * NB! Assumes an integer feasible solution is available in vars x
+     * NB! Assumes an integer feasible solution is available in vars x and that
+     * this->solution_vector was filled by calling fill_solution_vectors().
      */
 
     vector<bool> colour_done = vector<bool>(instance->num_subgraphs, false);
     vector<bool> vertex_done
         = vector<bool>(instance->graph->num_vertices, false);
 
-    // retrieve assignment of each vertex in the solution; -1 means uncoloured
-    vector<long> colour_map = vector<long>(instance->graph->num_vertices, -1);
-    for (long u = 0; u < instance->graph->num_vertices; ++u)
-    {
-        long c = 0;
-        while (c < instance->num_subgraphs && colour_map.at(u) < 0)
-        {
-            if (this->x[u][c].get(GRB_DoubleAttr_X) > 1-EPSILON_TOL)
-                colour_map.at(u) = c;
-            else
-                ++c;
-        }
-    }
-
     // dfs from each colour
     for (long u = 0; u < instance->graph->num_vertices; ++u)
     {
-        long u_colour = colour_map.at(u);   // -1 if uncoloured
+        long u_colour = solution_vector.at(u);   // -1 if uncoloured
 
         if (vertex_done.at(u) == false && u_colour > 0)
         {
@@ -240,7 +228,7 @@ bool CKSModel::check_solution()
             }
             else
             {
-                dfs_to_tag_component(u, u_colour, colour_map, vertex_done);
+                dfs_to_tag_component(u, u_colour, vertex_done);
                 colour_done.at(u_colour) = true;
             }
         }
@@ -251,7 +239,6 @@ bool CKSModel::check_solution()
 
 void CKSModel::dfs_to_tag_component(long u,
                                     long u_colour,
-                                    vector<long> &colour_map,
                                     vector<bool> &vertex_done)
 {
     // auxiliary dfs to check the connected component from vertex u
@@ -262,10 +249,10 @@ void CKSModel::dfs_to_tag_component(long u,
          it != instance->graph->adj_list.at(u).end(); ++it)
     {
         long v = *it;
-        long v_colour = colour_map.at(v);
+        long v_colour = solution_vector.at(v);
 
         if (v_colour == u_colour && vertex_done.at(v) == false)
-            dfs_to_tag_component(v, u_colour, colour_map, vertex_done);
+            dfs_to_tag_component(v, u_colour, vertex_done);
     }
 }
 
@@ -286,44 +273,15 @@ int CKSModel::save_optimization_status()
         this->solution_weight = this->solution_dualbound 
                               = model->get(GRB_DoubleAttr_ObjVal);
 
-        this->solution_vector = vector<long>(instance->graph->num_vertices, -1);
+        this->fill_solution_vectors();
 
-        #ifdef DEBUG
-            cout << "Optimal solution: " << endl;
-        #endif
-
-        ostringstream *solution_output 
-            = new ostringstream[instance->num_subgraphs];
-
-        for (long c = 0; c < instance->num_subgraphs; ++c)
-        {
-            solution_output[c].str("");
-            solution_output[c] << "#" << c << ": ";
-        }
-
-        for (long u = 0; u < instance->graph->num_vertices; ++u)
-            for (long c = 0; c < instance->num_subgraphs; ++c)
-                if (this->x[u][c].get(GRB_DoubleAttr_X) > EPSILON_TOL)
-                {
-                    // NB: gurobi vars are floating point, allowing +0 and -0
-                    this->solution_vector.at(u) = c;
-                    solution_output[c] << u << " ";
-                }
-
-        #ifdef DEBUG
-            for (long c = 0; c < instance->num_subgraphs; ++c)
-                cout << solution_output[c].str() << endl;
-        #endif
-
-        delete[] solution_output;
-
-       if (CHECK_SOLUTION)
-        {
-            if (this->check_solution())
-                cout << "Passed solution check" << endl;
-            else
-                cout << "WRONG SOLUTION" << endl;
-        }
+        if (this->check_solution())
+            cout << "PASSED SOLUTION CHECK" << endl << endl;
+        else
+            cout << endl
+                 << "######################" << endl
+                 << "### WRONG SOLUTION ###" << endl
+                 << "######################" << endl << endl;
 
         // returning number of feasible solutions found (including sub-optimal)
         return model->get(GRB_IntAttr_SolCount);
@@ -345,14 +303,27 @@ int CKSModel::save_optimization_status()
     {
         this->solution_status = STATUS_UNKNOWN;
 
-        this->solution_weight = (model->get(GRB_IntAttr_SolCount) > 0) ?
-                                model->get(GRB_DoubleAttr_ObjVal) :
-                                numeric_limits<double>::max();
         this->solution_dualbound = model->get(GRB_DoubleAttr_ObjBound);
+        if (model->get(GRB_IntAttr_SolCount) > 0)
+        {
+            this->solution_weight = model->get(GRB_DoubleAttr_ObjVal);
+
+            this->fill_solution_vectors();
+
+            if (this->check_solution())
+                cout << "PASSED SOLUTION CHECK" << endl << endl;
+            else
+                cout << endl
+                     << "######################" << endl
+                     << "### WRONG SOLUTION ###" << endl
+                     << "######################" << endl << endl;
+        }
+        else
+            this->solution_weight = numeric_limits<double>::max();
 
         cout << "Time limit exceeded (" << solution_runtime << ")" << endl;
-        cout << "Dual bound " << this->solution_dualbound 
-             << ", primal bound " << this->solution_weight 
+        cout << "Primal bound " << this->solution_weight 
+             << ", dual bound " << this->solution_dualbound 
              << " (MIP gap " << 100*model->get(GRB_DoubleAttr_MIPGap) << "%)" 
              << endl;
 
@@ -369,6 +340,40 @@ int CKSModel::save_optimization_status()
 
         return 0;
     }
+}
+
+void CKSModel::fill_solution_vectors()
+{
+    this->solution_vector = vector<long>(instance->graph->num_vertices, -1);
+
+    #ifdef DEBUG
+        cout << "Solution assignment: " << endl;
+    #endif
+
+    ostringstream *solution_output 
+        = new ostringstream[instance->num_subgraphs];
+
+    for (long c = 0; c < instance->num_subgraphs; ++c)
+    {
+        solution_output[c].str("");
+        solution_output[c] << "#" << c << ": ";
+    }
+
+    for (long u = 0; u < instance->graph->num_vertices; ++u)
+        for (long c = 0; c < instance->num_subgraphs; ++c)
+            if (this->x[u][c].get(GRB_DoubleAttr_X) > 0.5)
+            {
+                // NB: gurobi vars are floating point, allowing +0 and -0
+                this->solution_vector.at(u) = c;
+                solution_output[c] << u << " ";
+            }
+
+    #ifdef DEBUG
+        for (long c = 0; c < instance->num_subgraphs; ++c)
+            cout << solution_output[c].str() << endl;
+    #endif
+
+    delete[] solution_output;
 }
 
 bool CKSModel::solve_lp_relax(bool logging)

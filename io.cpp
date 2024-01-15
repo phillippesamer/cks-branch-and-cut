@@ -277,13 +277,18 @@ void IO::save_ip_info(long lb,
 {
     /// save mip info: lb ub gap time #nodes #msi #indegree
 
-    summary_info << setw(8) << lb;
+    summary_info << setw(8) << fixed << setprecision(2) << lb;
     summary_info << setw(8) << "  &  ";
-    summary_info << setw(8) << ub;
+    summary_info << setw(8) << fixed << setprecision(2) << ub;
 
-    double percentual_gap = 100 * gap;
     summary_info << setw(8) << "  &  ";
-    summary_info << setw(8) << fixed << setprecision(2) << percentual_gap;
+    if (gap < 10) // < 1000%
+    {
+        double percentual_gap = 100 * gap;
+        summary_info << setw(8) << fixed << setprecision(2) << percentual_gap;
+    }
+    else
+        summary_info << setw(8) << " -- ";
 
     summary_info << setw(8) << "  &  ";
     summary_info << setw(8) << fixed << setprecision(2) << time;
