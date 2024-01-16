@@ -30,11 +30,28 @@ int main(int argc, char **argv)
 
     IO* instance = new IO();
 
-    if (argc == 3)
+    if (argc < 3)
+    {
+        cout << endl << "usage: \t" << argv[0];
+        if (CONVEX_RECOLORING_INSTANCE)
+            cout << " [CR instance file] [CR solution file]" << endl << endl;
+        else
+        {
+            cout << " [.stp or .gcc input file path] [number of subgraphs] [-e]"
+                 << endl << endl;
+            cout << " [-e]: flag indicating .stp format instance "
+                 << "WITH edge weights (to be ignored)" << endl << endl;
+        }
+
+        delete instance;
+        return 0;
+    }
+    else
     {
         if (CONVEX_RECOLORING_INSTANCE)
         {
-            cout << "convex recoloring" << endl;
+            cout << "### CONVEX RECOLORING ###" << endl << endl;
+
             if (instance->parse_CR_input_file(string(argv[1])) == false)
             {
                 cout << "unable to parse CR input file" << endl;
@@ -44,25 +61,24 @@ int main(int argc, char **argv)
         }
         else
         {
-            instance->num_subgraphs = atol(argv[2]);
+            cout << "### CONNECTED K-SUBPARTITION ###" << endl << endl;
 
-            if ( !instance->parse_single_weight_input_file(string(argv[1])) )
+            instance->num_subgraphs = atol(argv[2]);
+            bool stp_with_edge_weights = (argc > 3);
+
+            string file_path = string(argv[1]);
+            string file_extension = file_path.substr(file_path.find_last_of(".")+1);
+
+            bool successful_parsing = (file_extension.compare("gcc") == 0) ?
+                                      instance->parse_gcc_file(file_path) :
+                                      instance->parse_stp_file(file_path, stp_with_edge_weights);
+            if (!successful_parsing)
             {
-                cout << "unable to parse input file" << endl;
-                delete instance;
-                return 0;
+                    cout << "unable to parse input file" << endl;
+                    delete instance;
+                    return 0;
             }
         }
-    }
-    else
-    {
-        cout << endl << "usage: \t" << argv[0]
-             << " [CR instance file] [CR solution file]" << endl << endl;
-        cout << "or \t" << argv[0]
-             << " [input file path] [number of subgraphs]" << endl << endl;
-
-        delete instance;
-        return 0;
     }
 
     if (WRITE_LATEX_TABLE_ROW)

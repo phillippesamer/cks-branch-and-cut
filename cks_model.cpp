@@ -2,7 +2,7 @@
 
 /// algorithm setup switches
 
-bool ORDER_COLOURS_CONSTRAINTS = true; // reduces solution symmetry
+bool ORDER_COLOURS_CONSTRAINTS = true; // reduces solution symmetry (DOES NOT APPLY TO CONVEX RECOLORING)
 
 const double EPSILON_TOL = 1e-5;
 

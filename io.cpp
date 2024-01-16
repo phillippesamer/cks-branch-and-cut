@@ -9,6 +9,7 @@ IO::IO()
     this->num_subgraphs = 1;
     this->recoloring_instance = false;
     this->original_colouring = vector<long>();
+    this->only_nonpositive_weights = false;
 }
 
 IO::~IO()
@@ -16,7 +17,7 @@ IO::~IO()
     delete graph;
 }
 
-bool IO::parse_single_weight_input_file(string filename)
+bool IO::parse_gcc_file(string filename)
 {
     /// Simple input with a weight for each vertex (subgraphs do not matter)
 
@@ -81,11 +82,16 @@ bool IO::parse_single_weight_input_file(string filename)
         }
 
         // n lines for vertex weights
+        this->only_nonpositive_weights = true;
         for (long line_idx = 0; line_idx < num_vertices; ++line_idx)
         {
             double w;
             input_fh >> w;
             graph->w.push_back(w);
+
+            // keeping track if all weights are <= 0
+            if (w > 0 && only_nonpositive_weights)
+                only_nonpositive_weights = false;
         }
 
         input_fh.close();
@@ -196,11 +202,149 @@ bool IO::parse_CR_input_file(string filename)
     return true;
 }
 
+bool IO::parse_stp_file(string filename, bool edge_weights_given)
+{
+    /***
+     * Steiner Tree Problem format used in DIMACS challenge benchmark instances
+     * Call with edge_weights_given set to true to ignore edge weights included
+     * in each edge line (as some benchmark sets do include edge weights).
+     */
+
+    // instance id from file name: what's after last slash and before last dot
+    size_t dot_pos = filename.find_last_of(".");
+    size_t last_slash_pos = filename.find_last_of("/\\");
+    instance_id = filename.substr(last_slash_pos+1, dot_pos-1 - last_slash_pos);
+    instance_id_trimmed = instance_id;
+
+    long num_vertices, num_edges;
+
+    ifstream input_fh(filename);
+    
+    if (input_fh.is_open())
+    {
+        string line, word;
+        
+        // 1. SKIP IDENTIFICATION LINE AND COMMENT SECTION
+        do
+        {
+            getline(input_fh, line);
+        }
+        while(line.find("SECTION Graph") == string::npos);
+
+        // 2. TWO LINES FOR NUMBER OF VERTICES AND EDGES
+        input_fh >> word;          // e.g. "Nodes 2853"
+        input_fh >> num_vertices;
+        input_fh >> word;          // e.g. "Edges 3335"
+        input_fh >> num_edges;
+
+        // initialize graph (own structures only; lemon object at the end)
+        delete graph;
+        this->graph = new Graph(num_vertices,num_edges);
+        this->graph->init_index_matrix();
+
+        // 3. m LINES FOR EDGES
+        for (long line_idx = 0; line_idx < num_edges; ++line_idx)
+        {
+            // must skip a word (the edge line marker "E"): e.g. "E 1 2" 
+            input_fh >> word;
+
+            // NB! in this format, the vertices are labeled in [1, n]
+            long i, j;
+            input_fh >> i;
+            input_fh >> j;
+            --i;
+            --j;
+
+            if (edge_weights_given)
+            {
+                double weight;
+                input_fh >> weight;
+            }
+
+            graph->s.push_back(i);
+            graph->t.push_back(j);
+            
+            graph->adj_list[i].push_back(j);
+            graph->adj_list[j].push_back(i);
+            
+            // should never happen
+            if (graph->index_matrix[i][j] >= 0 ||
+                graph->index_matrix[j][i] >= 0 )
+            {
+                cerr << "ERROR: repeated edge in input file line "
+                     << line_idx << endl << endl;
+                return false;
+            }
+            
+            // store index of current edge
+            graph->index_matrix[i][j] = line_idx;
+            graph->index_matrix[j][i] = line_idx;
+        }
+
+        /**
+         * 4. ADVANCE TO TERMINALS SECTION TO RETRIEVE VERTEX WEIGHTS
+         */
+        do
+        {
+            getline(input_fh, line);
+        }
+        while(line.find("SECTION Terminals") == string::npos);
+
+        // skip line for number of terminals e.g. "Terminals 2853"
+        getline(input_fh, line);
+
+        // n lines for vertex weights (not given in order...!)
+        this->only_nonpositive_weights = true;
+        for (long line_idx = 0; line_idx < num_vertices; ++line_idx)
+        {
+            // must skip a word (the terminal line marker "T"): e.g. "T 2064 -10.5885201522015"
+            input_fh >> word;
+
+            // NB! Remember: in this format, the vertices are labeled in [1, n]
+            long u;
+            input_fh >> u;
+            --u;
+
+            double w;
+            input_fh >> w;
+            graph->w.push_back(w);
+
+            // keeping track if all weights are <= 0
+            if (w > 0 && only_nonpositive_weights)
+                only_nonpositive_weights = false;
+        }
+
+        #ifdef DEBUG
+            cout << endl << "### STP instance parsed";
+            cout << endl << "  id = " << instance_id_trimmed
+                 << endl << "  n  = " << num_vertices
+                 << endl << "  m  = " << num_edges
+                 << endl << "  edge 0  = {" << graph->s.at(0) << ", " << graph->t.at(0) << "}"
+                 << endl << "  edge " << graph->s.size() << "  = {" << graph->s.back() << ", " << graph->t.back() << "}"
+                 << endl << "  weight of v_0 = " << graph->w.at(0)
+                 << endl << "  weight of v_" << num_vertices-1 << " = " << graph->w.back()
+                 << endl << endl;
+        #endif
+
+        input_fh.close();
+    }
+    else
+    {
+        cerr << "ERROR: could not open file (might not exist)." << endl;
+        return false;
+    }
+
+    // lemon data structure initialization
+    graph->init_lemon();
+
+    return true;
+}
+
 void IO::save_instance_info()
 {
     /// save instance info: id  n  m  k
     summary_info << left;
-    summary_info << setw(15) << instance_id_trimmed;
+    summary_info << setw(50) << instance_id_trimmed;
     summary_info << setw(8) << "  &  ";
     summary_info << setw(8) << graph->num_vertices;
     summary_info << setw(8) << "  &  ";

@@ -55,6 +55,8 @@ protected:
 
     GRBVar **x_vars;
     double **x_val;
+    vector<bool> x_integral_wrt_colour;
+    void inline check_integrality();
     void inline clean_x_val_beyond_precision(int);
 
     long indegree_counter;
@@ -62,8 +64,10 @@ protected:
     bool separate_indegree(vector<GRBLinExpr> &, vector<long> &);
 
     long minimal_separators_counter;
+    long msi_next_source;
     bool run_minimal_separators_separation(int);
-    bool separate_minimal_separators(vector<GRBLinExpr> &, vector<long> &);
+    bool separate_minimal_separators_std(vector<GRBLinExpr> &, vector<long> &);
+    bool separate_minimal_separators_integral_colour(vector<GRBLinExpr> &, vector<long> &, long);
     void inline lift_to_minimal_separator(vector<long> &,
                                           vector<bool> &,
                                           long,
