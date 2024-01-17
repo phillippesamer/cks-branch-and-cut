@@ -19,7 +19,11 @@ using namespace std;
 // execution switches
 bool CONVEX_RECOLORING_INSTANCE = false;   // e.g. as of ITOR'2022
 
-double RUN_CKS_WITH_TIME_LIMIT = 1800;
+double RUN_CKS_WITH_TIME_LIMIT = 3600.0;
+
+bool DEDICATED_LP_RELAXATION = true;
+double DEDICATED_LPR_TIME_LIMIT = 300;
+bool DEDICATED_LPR_GRB_CUTS_OFF = false;
 
 bool WRITE_LATEX_TABLE_ROW = true;
 string LATEX_TABLE_FILE_PATH = string("xp9msi.dat");
@@ -81,6 +85,17 @@ int main(int argc, char **argv)
         }
     }
 
+    /*
+    if (instance->only_nonpositive_weights)
+    {
+        cout << endl << "*** All edges in instance " << instance->instance_id
+             << " have non-positive weight." << endl;
+        cout << endl << "*** Empty solution is optimal." << endl;
+
+        return 0;
+    }
+    */
+
     if (WRITE_LATEX_TABLE_ROW)
     {
         instance->save_instance_info();
@@ -92,13 +107,17 @@ int main(int argc, char **argv)
 
     CKSModel *model = new CKSModel(instance);
 
-    /*
-    model->solve_lp_relax(false);
-    if (WRITE_LATEX_TABLE_ROW)
-        instance->save_lpr_info(model->lp_bound, model->lp_runtime);
-    */
-    
-    model->set_time_limit(RUN_CKS_WITH_TIME_LIMIT);
+    if (DEDICATED_LP_RELAXATION)
+    {
+        model->solve_lp_relax(false,
+                              DEDICATED_LPR_TIME_LIMIT,
+                              DEDICATED_LPR_GRB_CUTS_OFF);
+
+        if (WRITE_LATEX_TABLE_ROW)
+            instance->save_lpr_info(model->lp_bound, model->lp_runtime);
+    }
+
+    model->set_time_limit(RUN_CKS_WITH_TIME_LIMIT - model->lp_runtime);
     model->solve(true);
 
     if (WRITE_LATEX_TABLE_ROW)

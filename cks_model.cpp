@@ -4,6 +4,12 @@
 
 bool ORDER_COLOURS_CONSTRAINTS = true; // reduces solution symmetry (DOES NOT APPLY TO CONVEX RECOLORING)
 
+bool GRB_CUTS = true;             // gurobi (automatic) cuts on/off
+bool GRB_HEURISTICS = true;       // gurobi (automatic) heuristics on/off
+bool GRB_PREPROCESSING = true;    // gurobi (automatic) preprocessing on/off
+
+const bool GRB_HEURISTICS_FOCUS = false; // extra focus on gurobi heuristics
+
 const double EPSILON_TOL = 1e-5;
 
 CKSModel::CKSModel(IO *instance)
@@ -143,22 +149,32 @@ int CKSModel::solve(bool logging)
 {
     try
     {
-        // turn off all built-in cut generators
-        // model->set(GRB_IntParam_Cuts, 0);
+        // solver features
+        if (!GRB_CUTS)
+            model->set(GRB_IntParam_Cuts, 0);
 
-        /*
-        // turn off all preprocessing and heuristics
-        model->set(GRB_IntParam_Presolve, 0);
-        model->set(GRB_IntParam_PrePasses, 0);
-        model->set(GRB_DoubleParam_PreSOS1BigM, 0);
-        model->set(GRB_DoubleParam_PreSOS2BigM, 0);
-        model->set(GRB_IntParam_PreSparsify, 0);
-        model->set(GRB_IntParam_PreCrush, 1);
-        model->set(GRB_IntParam_DualReductions, 0);
-        model->set(GRB_IntParam_Aggregate, 0);
+        if (!GRB_HEURISTICS)
+            model->set(GRB_DoubleParam_Heuristics, 0);
+        else
+        {
+            if (GRB_HEURISTICS_FOCUS)
+            {
+                model->set(GRB_IntParam_MIPFocus, 1);
+                model->set(GRB_DoubleParam_Heuristics, 0.2);
+            }
+        }
 
-        model->set(GRB_DoubleParam_Heuristics, 0);
-        */
+        if (!GRB_PREPROCESSING)
+        {
+            model->set(GRB_IntParam_Presolve, 0);
+            model->set(GRB_IntParam_PrePasses, 0);
+            model->set(GRB_DoubleParam_PreSOS1BigM, 0);
+            model->set(GRB_DoubleParam_PreSOS2BigM, 0);
+            model->set(GRB_IntParam_PreSparsify, 0);
+            model->set(GRB_IntParam_PreCrush, 1);
+            model->set(GRB_IntParam_DualReductions, 0);
+            model->set(GRB_IntParam_Aggregate, 0);
+        }
 
         if (logging == true)
             model->set(GRB_IntParam_OutputFlag, 1);
@@ -376,7 +392,7 @@ void CKSModel::fill_solution_vectors()
     delete[] solution_output;
 }
 
-bool CKSModel::solve_lp_relax(bool logging)
+bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off)
 {
     /***
      * Solves the LP relaxation of the full IP formulation for connected
@@ -386,8 +402,8 @@ bool CKSModel::solve_lp_relax(bool logging)
 
     try
     {
-        // turn off all gurobi cut generators
-        model->set(GRB_IntParam_Cuts, 0);
+        if (grb_cuts_off)
+            model->set(GRB_IntParam_Cuts, 0);
 
         if (logging == true)
             model->set(GRB_IntParam_OutputFlag, 1);
@@ -411,13 +427,13 @@ bool CKSModel::solve_lp_relax(bool logging)
         model->optimize();
         bool model_updated = true;
         this->lp_passes = 1;
+        this->lp_runtime = model->get(GRB_DoubleAttr_Runtime);
 
         while (model_updated && model->get(GRB_IntAttr_Status) == GRB_OPTIMAL)
         {
-            #ifdef DEBUG_LPR
             cout << "LP relaxation pass #" << lp_passes << " (bound = "
-                 << model->get(GRB_DoubleAttr_ObjVal) << ")" << endl;
-            #endif
+                 << model->get(GRB_DoubleAttr_ObjVal) << ", runtime: "
+                 << this->lp_runtime << ")" << endl;
 
             // cut generator object used only to find violated inequalities;
             // the callback in gurobi is not run in this context
@@ -428,15 +444,23 @@ bool CKSModel::solve_lp_relax(bool logging)
             {
                 model->optimize();  // includes processing pending modifications
                 this->lp_passes++;
+
+                // time limit bookkeeping
+                gettimeofday(clock_stop, 0);
+                unsigned long clock_time
+                    = 1.e6 * (clock_stop->tv_sec - clock_start->tv_sec) +
+                             (clock_stop->tv_usec - clock_start->tv_usec);
+
+                this->lp_runtime = ((double)clock_time / (double)1.e6);
+
+                if (this->lp_runtime > time_limit)
+                {
+                    cout << endl << "[LPR] Time limit exceeded" << endl;
+                    model_updated = false;
+                }
             }
         }
 
-        // LP relaxation time
-        gettimeofday(clock_stop, 0);
-        unsigned long clock_time
-            = 1.e6 * (clock_stop->tv_sec - clock_start->tv_sec) +
-                     (clock_stop->tv_usec - clock_start->tv_usec);
-        this->lp_runtime = ((double)clock_time / (double)1.e6);
         free(clock_start);
         free(clock_stop);
 
@@ -474,14 +498,28 @@ bool CKSModel::solve_lp_relax(bool logging)
                 delete[] solution_output;
             #endif
 
-            if (logging)
-            {
-                cout << "Minimal separator inequalities added: "
-                     <<  cutgen->minimal_separators_counter << endl;
+            cout << "Minimal separator inequalities added: "
+                 <<  cutgen->minimal_separators_counter << endl;
 
-                cout << "Indegree inequalities added: "
-                     << cutgen->indegree_counter << endl;
+            cout << "Indegree inequalities added: "
+                 << cutgen->indegree_counter << endl;
+
+            long num_frac_vars = 0;
+            for (long u = 0; u < instance->graph->num_vertices; ++u)
+            {
+                for (long c = 0; c < instance->num_subgraphs; ++c)
+                {
+                    double x_uc = this->x[u][c].get(GRB_DoubleAttr_X);
+                    if (x_uc > EPSILON_TOL && x_uc < 1-EPSILON_TOL)
+                        ++num_frac_vars;
+                }
             }
+            if (num_frac_vars > 0)
+            {
+                cout << "[LPR] " << num_frac_vars << " fractional variables" << endl;
+            }
+            else
+                cout << "[LPR] integer feasible solution" << endl;
 
             // restore IP model
             model->set(GRB_IntParam_Cuts, -1);

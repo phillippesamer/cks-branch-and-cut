@@ -3,10 +3,10 @@
 /// algorithm setup switches
 
 bool SEPARATE_MSI = true;               // MSI = minimal separator inequalities
-bool SEPARATE_INDEGREE = false;
+bool SEPARATE_INDEGREE = true;
 
 bool MSI_ONLY_IF_NO_INDEGREE = false;   // only used with SEPARATE_MSI == true
-bool INDEGREE_AT_ROOT_ONLY = false;
+bool INDEGREE_AT_ROOT_ONLY = true;
 
 // strategy for running separation algorithms for colour-specific inequalities
 bool SEARCH_ALL_COLOURS_FOR_INDEGREE = true;

@@ -411,8 +411,8 @@ void IO::save_lpr_info(double lp_bound, double lp_time)
     #endif
 }
 
-void IO::save_ip_info(long lb,
-                      long ub,
+void IO::save_ip_info(double lb,
+                      double ub,
                       double gap,
                       double time,
                       long node_count,
