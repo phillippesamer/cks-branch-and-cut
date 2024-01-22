@@ -4,6 +4,7 @@
 
 bool SEPARATE_MSI = true;               // MSI = minimal separator inequalities
 bool SEPARATE_INDEGREE = true;
+bool SEPARATE_GSCI = true;              // GSCI = generalized single-class ineq. NB! CURRENTLY SKIPPING INDEGREE CUTS IF AN GSCI WAS FOUND!
 
 bool MSI_ONLY_IF_NO_INDEGREE = false;   // only used with SEPARATE_MSI == true
 bool INDEGREE_AT_ROOT_ONLY = true;
@@ -114,6 +115,7 @@ CKSCutGenerator::CKSCutGenerator(GRBModel *model, GRBVar **x_vars, IO *instance)
 
     this->msi_next_source = 0;
     this->msi_current_colour = 0;
+    this->gsci_counter = 0;
 }
 
 void CKSCutGenerator::callback()
@@ -147,7 +149,10 @@ void CKSCutGenerator::callback()
 
             bool separated = false;
 
-            if (SEPARATE_INDEGREE)
+            if (SEPARATE_GSCI)
+                separated = run_gsci_separation(ADD_USER_CUTS);
+
+            if (SEPARATE_INDEGREE && !separated)
             {
                 if (at_root_relaxation || !INDEGREE_AT_ROOT_ONLY)
                     separated = run_indegree_separation(ADD_USER_CUTS);
@@ -221,10 +226,14 @@ bool CKSCutGenerator::separate_lpr()
 
         this->check_integrality();
 
+        bool gsci_cut = false;
         bool indegree_cut = false;
         bool msi_cut = false;
 
-        if (SEPARATE_INDEGREE)
+        if (SEPARATE_GSCI)
+            gsci_cut = run_gsci_separation(ADD_STD_CNTRS);
+
+        if (SEPARATE_INDEGREE && !gsci_cut)
             indegree_cut = run_indegree_separation(ADD_STD_CNTRS);
 
         if (SEPARATE_MSI)
@@ -242,7 +251,7 @@ bool CKSCutGenerator::separate_lpr()
             delete[] x_val[u];
         delete[] x_val;
 
-        return (indegree_cut || msi_cut);
+        return (gsci_cut || indegree_cut || msi_cut);
     }
     catch (GRBException e)
     {
@@ -268,6 +277,8 @@ void CKSCutGenerator::clean_x_val_beyond_precision(int precision)
             x_val[u][c] = tmp * std::pow(10, -precision);
         }
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 bool CKSCutGenerator::run_indegree_separation(int kind_of_cut)
 {
@@ -355,6 +366,8 @@ bool CKSCutGenerator::separate_indegree(vector<GRBLinExpr> &cuts_lhs,
 
     return (cuts_lhs.size() > 0);
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 bool CKSCutGenerator::run_minimal_separators_separation(int kind_of_cut)
 {
@@ -1062,3 +1075,48 @@ bool CKSCutGenerator::separate_minimal_separators_integral_colour(vector<GRBLinE
     this->msi_next_source++;
     return true;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+bool CKSCutGenerator::run_gsci_separation(int kind_of_cut)
+{
+    /// wrapper for the separation procedure to suit different execution contexts
+
+    bool model_updated = false;
+
+    // eventual cuts are stored here
+    vector<GRBLinExpr> cuts_lhs = vector<GRBLinExpr>();
+    vector<long> cuts_rhs = vector<long>();
+
+    // run separation heuristic for generalized single-class inequalities (GSCI)
+    model_updated = separate_gsci(cuts_lhs, cuts_rhs);
+
+    if (model_updated)
+    {
+        // add cuts
+        for (unsigned long idx = 0; idx<cuts_lhs.size(); ++idx)
+        {
+            ++gsci_counter;
+
+            if (kind_of_cut == ADD_USER_CUTS)
+                addCut(cuts_lhs[idx] <= cuts_rhs[idx]);
+
+            else if (kind_of_cut == ADD_LAZY_CNTRS)
+                addLazy(cuts_lhs[idx] <= cuts_rhs[idx]);
+
+            else // kind_of_cut == ADD_STD_CNTRS
+                model->addConstr(cuts_lhs[idx] <= cuts_rhs[idx]);
+        }
+    }
+
+    return model_updated;
+}
+
+bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
+                                    vector<long> &cuts_rhs)
+{
+    /// Solve the separation problem for generalized single-class inequalities
+    
+    // 1. CONSIDER COLOUR CLASSES WITH FRACTIONAL VARS
+}
+

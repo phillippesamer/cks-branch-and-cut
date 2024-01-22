@@ -80,6 +80,10 @@ protected:
 
     // only used with SEARCH_ALL_COLOURS_FOR_MSI = false
     long msi_current_colour;
+
+    long gsci_counter;
+    bool run_gsci_separation(int);
+    bool separate_gsci(vector<GRBLinExpr> &, vector<long> &);
 };
 
 #endif
