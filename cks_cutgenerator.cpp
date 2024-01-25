@@ -3,7 +3,7 @@
 /// algorithm setup switches
 
 bool SEPARATE_MSI = true;               // MSI = minimal separator inequalities
-bool SEPARATE_INDEGREE = true;
+bool SEPARATE_INDEGREE = false;
 bool SEPARATE_GSCI = true;              // GSCI = generalized single-class ineq. NB! CURRENTLY SKIPPING INDEGREE CUTS IF AN GSCI WAS FOUND!
 
 bool MSI_ONLY_IF_NO_INDEGREE = false;   // only used with SEPARATE_MSI == true
@@ -70,6 +70,55 @@ long inline check_components(vector< vector<long> > &adj_list,
     return count;
 }
 
+double inline get_common_out_neighbours(long v1,
+                                        long v2, 
+                                        const vector< list<long> > &adj_list,
+                                        double **x_val,
+                                        long colour,
+                                        set<long> &common_out_neighbours) 
+{
+    /***
+     * Fills 'common_out_neighbours' with indices of vertices u adjacent to both
+     * v1 and v2, and such that x_val[u][colour] is smaller than both
+     * x_val[v1][colour] and x_val[v2][colour].
+     * Returns the sum of such x_val[u][colour].
+     */
+
+    double total = 0.;
+
+    for (list<long>::const_iterator it_v1 = adj_list.at(v1).begin();
+        it_v1 != adj_list.at(v1).end(); ++it_v1)
+    {
+        long u = *it_v1;
+
+        // cheaper to test first if the possible arcs would be oriented into u
+        bool x_v1_above = ( x_val[v1][colour]  > x_val[u][colour] ||
+                           (x_val[v1][colour] == x_val[u][colour] && v1<u) );
+        bool x_v2_above = ( x_val[v2][colour]  > x_val[u][colour] ||
+                           (x_val[v2][colour] == x_val[u][colour] && v2<u) );
+
+        if (x_v1_above && x_v2_above)
+        {
+            bool found = false;
+            list<long>::const_iterator it_v2 = adj_list.at(v2).begin();
+            while (it_v2 != adj_list.at(v2).end() && !found)
+            {
+                // is this neighbour of v2 exactly u?
+                if (u == *it_v2)
+                {
+                    found = true;
+                    common_out_neighbours.insert(u);
+                    total += x_val[u][colour];
+                }
+
+                ++it_v2;
+            }
+        }
+    }
+
+    return total;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 void CKSCutGenerator::check_integrality()
@@ -84,10 +133,13 @@ void CKSCutGenerator::check_integrality()
     for (long colour = 0; colour < num_subgraphs; ++colour)
     {
         bool current_is_integral = true;
-        for (long u = 0; u < num_vertices; ++u)
+        long u = 0;
+        while (u < num_vertices && current_is_integral)
         {
             if (x_val[u][colour] > MSI_ZERO && x_val[u][colour] < MSI_ONE)
                 current_is_integral = false;
+
+            ++u;
         }
 
         if (current_is_integral)
@@ -105,6 +157,7 @@ CKSCutGenerator::CKSCutGenerator(GRBModel *model, GRBVar **x_vars, IO *instance)
     this->instance = instance;
 
     this->num_vertices = instance->graph->num_vertices;
+    this->num_edges = instance->graph->num_edges;
     this->num_subgraphs = instance->num_subgraphs;
     this->at_root_relaxation = true;
 
@@ -116,6 +169,8 @@ CKSCutGenerator::CKSCutGenerator(GRBModel *model, GRBVar **x_vars, IO *instance)
     this->msi_next_source = 0;
     this->msi_current_colour = 0;
     this->gsci_counter = 0;
+    this->gsci_current_colour = 0;
+    this->gsci_current_starting_v1 = 0;
 }
 
 void CKSCutGenerator::callback()
@@ -321,8 +376,6 @@ bool CKSCutGenerator::separate_indegree(vector<GRBLinExpr> &cuts_lhs,
 {
     /// Solve the separation problem for indegree inequalities, for each colour
 
-    const long num_edges = instance->graph->num_edges;
-
     long colour = 0;
     bool done = false;
     while (colour < num_subgraphs && !done)
@@ -334,7 +387,7 @@ bool CKSCutGenerator::separate_indegree(vector<GRBLinExpr> &cuts_lhs,
         {
             long u = instance->graph->s.at(idx);
             long v = instance->graph->t.at(idx);
-            if (x_val[u][colour] > x_val[v][colour] + INDEGREE_EPSILON)
+            if (x_val[u][colour] >= x_val[v][colour])
                 indegree.at(v) += 1;
             else
                 indegree.at(u) += 1;
@@ -535,7 +588,6 @@ bool CKSCutGenerator::separate_minimal_separators_std(vector<GRBLinExpr> &cuts_l
 
             // 1.4 REMAINING ARCS, WITH UNLIMITED CAPACITY (|V|+1 SUFFICES HERE!)
 
-            const long num_edges = instance->graph->num_edges;
             const long UNLIMITED_CAPACITY = num_vertices + 1;
 
             for (long idx = 0; idx < num_edges; ++idx)
@@ -1116,7 +1168,214 @@ bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
                                     vector<long> &cuts_rhs)
 {
     /// Solve the separation problem for generalized single-class inequalities
-    
-    // 1. CONSIDER COLOUR CLASSES WITH FRACTIONAL VARS
+
+    // 1. ITERATE OVER EACH COLOUR CLASS THAT INCLUDES FRACTIONAL VARS
+
+    long colours_tried = 0;
+    bool done = false;
+    while (colours_tried < num_subgraphs && !done)
+    {
+        long colour = this->gsci_current_colour;
+
+        if (this->x_integral_wrt_colour.at(colour) == false)
+        {
+            // the first index corresponds to the representative in each pair
+            vector<pair<long,long> > pairs = vector<pair<long,long> >();
+            vector<bool> paired = vector<bool>(num_vertices, false);
+            vector<bool> representative = vector<bool>(num_vertices, false);
+            vector<long> class_of_vertex = vector<long>(num_vertices, -1);
+
+            // 2. STARTING WITH THE ARC ORIENTATION IN STANDARD INDEGREE INEQUALITIES
+
+            /* NB! Even though the reference/starting partitioning changes with
+             * each pair made below, the actual evaluation (3.1 below) on each
+             * iteration does not depend on the partitioning (it is based on
+             * x_val only, no coefficients involved); we may recompute indegrees
+             * only when adding an inequality.
+             */
+
+            double lhs_of_std_indegree = 0.;
+            vector<long> indegree = vector<long>(num_vertices, 0);
+
+            for (long idx = 0; idx < num_edges; ++idx)
+            {
+                long u = instance->graph->s.at(idx);
+                long v = instance->graph->t.at(idx);
+                if ( x_val[u][colour]  > x_val[v][colour] ||
+                    (x_val[u][colour] == x_val[v][colour] && u<v) )
+                    indegree.at(v) += 1;
+                else
+                    indegree.at(u) += 1;
+            }
+
+            for (long u = 0; u < num_vertices; ++u)
+                lhs_of_std_indegree += ( (1 - indegree.at(u)) * x_val[u][colour] );
+
+            // 3. TRY TO PAIR UP VERTICES (AT NONZERO VALUE IN THE CURRENT RELAXATION)
+
+            long num_trials = 0;
+            long v1 = this->gsci_current_starting_v1;
+ 
+            while (num_trials < num_vertices)
+            {
+                // no cut possible if v1 is null
+                if (x_val[v1][colour] > MSI_ZERO && !paired[v1])
+                {
+                    long v2 = v1+1;
+                    while (v2 < num_vertices && !paired[v1])
+                    {
+                        // no cut possible if v2 is null
+                        if (x_val[v2][colour] > MSI_ZERO && !paired[v2])
+                        {
+                            // 3.1. EVALUATE LHS BENEFIT OF HAVING A SET {V_1, V_2} IN THE PARTITION
+
+                            // TO DO: if not needed in each iteration, remove the list and just get the number
+                            // sum of x_val of common out-neighbours
+                            set<long> common_neighbours = set<long>();
+                            double possible_gain = get_common_out_neighbours(v1,
+                                                                             v2,
+                                                                             instance->graph->adj_list,
+                                                                             x_val,
+                                                                             colour,
+                                                                             common_neighbours);
+                            bool lhs_improves = false;
+                            bool x_v1_above = ( x_val[v1][colour]  > x_val[v2][colour] ||
+                                               (x_val[v1][colour] == x_val[v2][colour] && v1<v2) );
+
+                            // first case: v1 and v2 are adjacent
+                            if (instance->graph->index_matrix[v1][v2] >= 0)
+                                lhs_improves = (possible_gain > MSI_ZERO);
+
+                            // second case: v1 and v2 are not neighbours
+                            else
+                            {
+                                if (x_v1_above)
+                                    lhs_improves = (possible_gain - x_val[v2][colour] > MSI_ZERO);
+                                else
+                                    lhs_improves = (possible_gain - x_val[v1][colour] > MSI_ZERO);
+                            }
+
+                            // 3.2. PAIR V_1 AND V_2 IF MERGING THEM GIVES A STRONGER LHS
+                            if (lhs_improves)
+                            {
+                                if (x_v1_above)
+                                {
+                                    pairs.push_back(make_pair(v1,v2));
+                                    representative[v1] = true;
+                                }
+                                else
+                                {
+                                    pairs.push_back(make_pair(v2,v1));
+                                    representative[v2] = true;
+                                }
+
+                                paired[v1] = true;
+                                paired[v2] = true;
+                                class_of_vertex[v1] = pairs.size()-1;
+                                class_of_vertex[v2] = pairs.size()-1;
+                            }
+                        }
+
+                        ++v2;
+                    }
+                }
+
+                v1 = (v1 + 1) % num_vertices;
+                ++num_trials;
+            }
+
+            // 4. FOUND A VIOLATED GSCI BASED ON THIS COLOUR?
+            if(pairs.size() > 0)
+            {
+                // fill up information for vertices that will remain in singletons
+                long num_of_classes = pairs.size();
+                vector<set<long> > incoming_classes = vector<set<long> >();
+
+                for (long u=0; u < num_vertices; ++u)
+                {
+                    incoming_classes.push_back(set<long>());
+
+                    if (!paired[u])
+                    {
+                        class_of_vertex[u] = num_of_classes++;
+                        representative[u] = true;
+                    }
+                }
+
+                // calculate updated indegree vector
+                for (long idx = 0; idx < num_edges; ++idx)
+                {
+                    long u = instance->graph->s.at(idx);
+                    long v = instance->graph->t.at(idx);
+
+                    if (class_of_vertex[u] != class_of_vertex[v])
+                    {
+                        // indegree orientation
+                        if ( x_val[u][colour]  > x_val[v][colour] ||
+                            (x_val[u][colour] == x_val[v][colour] && u<v) )
+                            incoming_classes[v].insert(class_of_vertex[u]);
+                        else
+                            incoming_classes[u].insert(class_of_vertex[v]);
+                    }
+                }
+
+                // store inequality (caller method adds it to the model)
+                GRBLinExpr violated_constr = 0;
+
+                for (long u = 0; u < num_vertices; ++u)
+                {
+                    long d_hat = incoming_classes[u].size();
+
+                    if (representative[u])
+                        violated_constr += ( (1 - d_hat) * x_vars[u][colour] );
+                    else
+                        violated_constr += ( (0 - d_hat) * x_vars[u][colour] );
+                }
+
+                cuts_lhs.push_back(violated_constr);
+                cuts_rhs.push_back(1);
+
+                #ifdef DEBUG_GSCI
+                    double violating_lhs = 0;
+
+                    cout << "### ADDED GSCI ON COLOUR #" << colour << ": ";
+
+                    for (long u = 0; u < num_vertices; ++u)
+                    {
+                        long d_hat = incoming_classes[u].size();
+                        if (representative[u])
+                        {
+                            cout << "(1-" << d_hat << ")x_" << u << " + ";
+                            violating_lhs += ( (1 - d_hat) * x_val[u][colour] );
+                        }
+                    }
+                    for (long u = 0; u < num_vertices; ++u)
+                    {
+                        long d_hat = incoming_classes[u].size();
+                        if (!representative[u])
+                        {
+                            cout << "-" << d_hat << "x_" << u << " ";
+                            violating_lhs += ( (0 - d_hat) * x_val[u][colour] );
+                        }
+                    }
+
+                    cout << " <= 1 " << endl;
+                    cout << right;
+                    cout << setw(80) << "(lhs at current point "
+                         << violating_lhs << ")" << endl;
+                    cout << left;
+                #endif
+            }
+        }
+
+        // move to the next colour (unless done)
+        this->gsci_current_colour = (this->gsci_current_colour+1) % num_subgraphs;
+        ++colours_tried;
+    }
+
+    // cycling v1 along different relaxations
+    this->gsci_current_starting_v1 = (this->gsci_current_starting_v1+1) % num_vertices;
+
+    return (cuts_lhs.size() > 0);
 }
 

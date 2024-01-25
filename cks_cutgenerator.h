@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iomanip>
 #include <map>
+#include <set>
 
 #include "gurobi_c++.h"
 
@@ -50,6 +51,7 @@ protected:
     IO *instance;
     GRBModel *model;
     long num_vertices;
+    long num_edges;
     long num_subgraphs;
     bool at_root_relaxation;
 
@@ -84,6 +86,8 @@ protected:
     long gsci_counter;
     bool run_gsci_separation(int);
     bool separate_gsci(vector<GRBLinExpr> &, vector<long> &);
+    long gsci_current_colour;
+    long gsci_current_starting_v1;
 };
 
 #endif

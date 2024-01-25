@@ -18,7 +18,7 @@ else
     endif
 endif
 
-CC          = g++ -Wall -Wextra -O3 -m64
+CC          = g++ -Wall -Wextra -O3 -m64 -DDEBUG_GSCI
 
 FILES_CC    = graph.cpp io.cpp cks_model.cpp cks_cutgenerator.cpp main.cpp
 
