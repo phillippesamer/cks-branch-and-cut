@@ -5,13 +5,14 @@
 bool SEPARATE_MSI = true;               // MSI = minimal separator inequalities
 bool SEPARATE_INDEGREE = false;
 bool SEPARATE_GSCI = true;              // GSCI = generalized single-class ineq. NB! CURRENTLY SKIPPING INDEGREE CUTS IF AN GSCI WAS FOUND!
+bool SEPARATE_MULTIWAY = true;          // MULTIWAY = multiclass inequalities defined by multiway cuts of a stable set
 
-bool MSI_ONLY_IF_NO_INDEGREE = false;   // only used with SEPARATE_MSI == true
 bool INDEGREE_AT_ROOT_ONLY = true;
 
 // strategy for running separation algorithms for colour-specific inequalities
 bool SEARCH_ALL_COLOURS_FOR_INDEGREE = true;
 bool MSI_STRATEGY_FIRST_CUT_BELOW_ROOT = true;
+bool GSCI_ADD_EACH_CUT_ON_ALL_COLOURS = false;
 
 // clean any bits beyond the corresponding precision to avoid numerical errors?
 // (at most 14, since gurobi does not support long double yet...)
@@ -171,6 +172,7 @@ CKSCutGenerator::CKSCutGenerator(GRBModel *model, GRBVar **x_vars, IO *instance)
     this->gsci_counter = 0;
     this->gsci_current_colour = 0;
     this->gsci_current_starting_v1 = 0;
+    this->multiway_counter = 0;
 }
 
 void CKSCutGenerator::callback()
@@ -202,26 +204,24 @@ void CKSCutGenerator::callback()
 
             this->check_integrality();
 
-            bool separated = false;
+            if (SEPARATE_MULTIWAY)
+                run_multiway_separation(ADD_USER_CUTS);
 
             if (SEPARATE_GSCI)
-                separated = run_gsci_separation(ADD_USER_CUTS);
+                run_gsci_separation(ADD_USER_CUTS);
 
-            if (SEPARATE_INDEGREE && !separated)
+            if (SEPARATE_INDEGREE)
             {
                 if (at_root_relaxation || !INDEGREE_AT_ROOT_ONLY)
-                    separated = run_indegree_separation(ADD_USER_CUTS);
+                    run_indegree_separation(ADD_USER_CUTS);
             }
 
             if (SEPARATE_MSI)
             {
-                if (!MSI_ONLY_IF_NO_INDEGREE || !separated)
-                {
-                    if (CLEAN_VARS_BEYOND_PRECISION)
-                        clean_x_val_beyond_precision(SEPARATION_PRECISION);
+                if (CLEAN_VARS_BEYOND_PRECISION)
+                    clean_x_val_beyond_precision(SEPARATION_PRECISION);
 
-                    run_minimal_separators_separation(ADD_LAZY_CNTRS);
-                }
+                run_minimal_separators_separation(ADD_LAZY_CNTRS);
             }
 
             for (long u=0; u < num_vertices; u++)
@@ -281,9 +281,13 @@ bool CKSCutGenerator::separate_lpr()
 
         this->check_integrality();
 
+        bool multiway_cut = false;
         bool gsci_cut = false;
         bool indegree_cut = false;
         bool msi_cut = false;
+
+        if (SEPARATE_MULTIWAY)
+            multiway_cut = run_multiway_separation(ADD_STD_CNTRS);
 
         if (SEPARATE_GSCI)
             gsci_cut = run_gsci_separation(ADD_STD_CNTRS);
@@ -293,20 +297,17 @@ bool CKSCutGenerator::separate_lpr()
 
         if (SEPARATE_MSI)
         {
-            if (!MSI_ONLY_IF_NO_INDEGREE || !indegree_cut)
-            {
-                if (CLEAN_VARS_BEYOND_PRECISION)
-                    clean_x_val_beyond_precision(SEPARATION_PRECISION);
+            if (CLEAN_VARS_BEYOND_PRECISION)
+                clean_x_val_beyond_precision(SEPARATION_PRECISION);
 
-                msi_cut = run_minimal_separators_separation(ADD_STD_CNTRS);
-            }
+            msi_cut = run_minimal_separators_separation(ADD_STD_CNTRS);
         }
 
         for (long u=0; u < num_vertices; u++)
             delete[] x_val[u];
         delete[] x_val;
 
-        return (gsci_cut || indegree_cut || msi_cut);
+        return (multiway_cut || gsci_cut || indegree_cut || msi_cut);
     }
     catch (GRBException e)
     {
@@ -1167,13 +1168,12 @@ bool CKSCutGenerator::run_gsci_separation(int kind_of_cut)
 bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
                                     vector<long> &cuts_rhs)
 {
-    /// Solve the separation problem for generalized single-class inequalities
+    /// Separation heuristic for generalized single-class inequalities
 
     // 1. ITERATE OVER EACH COLOUR CLASS THAT INCLUDES FRACTIONAL VARS
 
     long colours_tried = 0;
-    bool done = false;
-    while (colours_tried < num_subgraphs && !done)
+    while (colours_tried < num_subgraphs)
     {
         long colour = this->gsci_current_colour;
 
@@ -1183,7 +1183,7 @@ bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
             vector<pair<long,long> > pairs = vector<pair<long,long> >();
             vector<bool> paired = vector<bool>(num_vertices, false);
             vector<bool> representative = vector<bool>(num_vertices, false);
-            vector<long> class_of_vertex = vector<long>(num_vertices, -1);
+            vector<long> class_of_vertex = vector<long>(num_vertices, 0);
 
             // 2. STARTING WITH THE ARC ORIENTATION IN STANDARD INDEGREE INEQUALITIES
 
@@ -1319,52 +1319,59 @@ bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
                     }
                 }
 
-                // store inequality (caller method adds it to the model)
-                GRBLinExpr violated_constr = 0;
+                vector<long> d_hat = vector<long>(num_vertices, 0);
+                for (long u = 0; u < num_vertices; ++u)
+                    d_hat[u] = incoming_classes[u].size();
 
+                // evaluate LHS
+                double lhs = 0;
                 for (long u = 0; u < num_vertices; ++u)
                 {
-                    long d_hat = incoming_classes[u].size();
-
                     if (representative[u])
-                        violated_constr += ( (1 - d_hat) * x_vars[u][colour] );
+                        lhs += ( (1 - d_hat[u]) * x_val[u][colour] );
                     else
-                        violated_constr += ( (0 - d_hat) * x_vars[u][colour] );
+                        lhs += ( (0 - d_hat[u]) * x_val[u][colour] );
                 }
 
-                cuts_lhs.push_back(violated_constr);
-                cuts_rhs.push_back(1);
+                // if violated, store inequality (caller method adds it to the model)
+                if (lhs > 1+INDEGREE_EPSILON)
+                {
+                    #ifdef DEBUG_GSCI
+                        cout << right << setw(70) << "### ADDED GSCI FROM COLOUR #" << colour
+                             << ": lhs on the point is " << lhs << " > 1";
+                        cout << right << setw(40) << "[GSCI cuts found so far: "
+                             << this->gsci_counter << "]" << endl;
+                        cout << left;
+                    #endif
 
-                #ifdef DEBUG_GSCI
-                    double violating_lhs = 0;
+                    long cuts_added = 0;
+                    long c = colour;
+                    bool done = false;
 
-                    cout << "### ADDED GSCI ON COLOUR #" << colour << ": ";
-
-                    for (long u = 0; u < num_vertices; ++u)
+                    while (cuts_added < num_subgraphs && !done)
                     {
-                        long d_hat = incoming_classes[u].size();
-                        if (representative[u])
+                        // build up inequality
+                        GRBLinExpr violated_constr = 0;
+
+                        for (long u = 0; u < num_vertices; ++u)
                         {
-                            cout << "(1-" << d_hat << ")x_" << u << " + ";
-                            violating_lhs += ( (1 - d_hat) * x_val[u][colour] );
+                            if (representative[u])
+                                violated_constr += ( (1 - d_hat[u]) * x_vars[u][c] );
+                            else
+                                violated_constr += ( (0 - d_hat[u]) * x_vars[u][c] );
                         }
-                    }
-                    for (long u = 0; u < num_vertices; ++u)
-                    {
-                        long d_hat = incoming_classes[u].size();
-                        if (!representative[u])
-                        {
-                            cout << "-" << d_hat << "x_" << u << " ";
-                            violating_lhs += ( (0 - d_hat) * x_val[u][colour] );
-                        }
+
+                        cuts_lhs.push_back(violated_constr);
+                        cuts_rhs.push_back(1);
+
+                        ++cuts_added;
+                        c = (c+1) % num_subgraphs;
+
+                        if (GSCI_ADD_EACH_CUT_ON_ALL_COLOURS == false)
+                            done = true;
                     }
 
-                    cout << " <= 1 " << endl;
-                    cout << right;
-                    cout << setw(80) << "(lhs at current point "
-                         << violating_lhs << ")" << endl;
-                    cout << left;
-                #endif
+                } // lhs > 1
             }
         }
 
@@ -1379,3 +1386,69 @@ bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
     return (cuts_lhs.size() > 0);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+bool CKSCutGenerator::run_multiway_separation(int kind_of_cut)
+{
+    /// wrapper for the separation procedure to suit different execution contexts
+
+    bool model_updated = false;
+
+    // eventual cuts are stored here
+    vector<GRBLinExpr> cuts_lhs = vector<GRBLinExpr>();
+    vector<long> cuts_rhs = vector<long>();
+
+    // run separation heuristic for multiway inequalities
+    model_updated = separate_multiway(cuts_lhs, cuts_rhs);
+
+    if (model_updated)
+    {
+        // add cuts
+        for (unsigned long idx = 0; idx<cuts_lhs.size(); ++idx)
+        {
+            ++multiway_counter;
+
+            if (kind_of_cut == ADD_USER_CUTS)
+                addCut(cuts_lhs[idx] <= cuts_rhs[idx]);
+
+            else if (kind_of_cut == ADD_LAZY_CNTRS)
+                addLazy(cuts_lhs[idx] <= cuts_rhs[idx]);
+
+            else // kind_of_cut == ADD_STD_CNTRS
+                model->addConstr(cuts_lhs[idx] <= cuts_rhs[idx]);
+        }
+    }
+
+    return model_updated;
+}
+
+bool CKSCutGenerator::separate_multiway(vector<GRBLinExpr> &cuts_lhs,
+                                        vector<long> &cuts_rhs)
+{
+    /***
+     * Separation heuristic for (multiple colours) multiway inequalities
+     * 
+     * Let the weight of each vertex u be defined as f(u) = x_val[u][0] + ... +
+     * x_val[u][num_subgraphs].
+     * 1. Find a separating set Z (i.e. G-Z has more than one connected
+     * component) of minimum f-weight
+     * 2. Choose a vertex of maximum weight in each component of G-Z to
+     * determine stable set S
+     * 
+     * To solve 1, we proceed as indicated in "The vertex separator problem - a
+     * polyhedral investigation" (Balas and Souza, 2005); see the third
+     * paragraph in page 2 (wlog, we define k = 1 in b(n) = n-k).
+     * 
+     * 1a. Create the bipartite auxiliary graph H = (V1 \cup V2, F) s.t.
+     * - for each u in H, there are u1 in V1 and u2 in V2
+     * - for each u in H, there is {u1, u2} in F=E(H)
+     * - for each {u,v} in E = E(G), there are {u1, v2} and {v1, u2} in F=E(H)
+     * 
+     * 1b. Solve the max-weight stable set problem in H (with original weights
+     * assigned to both corresponding vertices in H) in O(n^4) via max-weight
+     * bipartite matching; see:
+     * https://ali-ibrahim137.github.io/competitive/programming/2020/01/02/maximum-independent-set-in-bipartite-graphs.html
+     */
+
+    return (cuts_lhs.size() > 0);
+}

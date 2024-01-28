@@ -198,6 +198,9 @@ int CKSModel::solve(bool logging)
 
             cout << "Indegree inequalities added: "
                  << cutgen->indegree_counter << endl;
+
+            cout << "Generalized single-colour inequalities added: "
+                 <<  cutgen->gsci_counter << endl;
         }
 
         return this->save_optimization_status();
@@ -503,6 +506,9 @@ bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off
 
             cout << "Indegree inequalities added: "
                  << cutgen->indegree_counter << endl;
+
+            cout << "Generalized single-colour inequalities added: "
+                 <<  cutgen->gsci_counter << endl;
 
             long num_frac_vars = 0;
             for (long u = 0; u < instance->graph->num_vertices; ++u)

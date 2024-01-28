@@ -88,6 +88,10 @@ protected:
     bool separate_gsci(vector<GRBLinExpr> &, vector<long> &);
     long gsci_current_colour;
     long gsci_current_starting_v1;
+
+    long multiway_counter;
+    bool run_multiway_separation(int);
+    bool separate_multiway(vector<GRBLinExpr> &, vector<long> &);
 };
 
 #endif

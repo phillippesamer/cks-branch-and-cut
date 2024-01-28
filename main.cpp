@@ -19,14 +19,14 @@ using namespace std;
 // execution switches
 bool CONVEX_RECOLORING_INSTANCE = false;   // e.g. as of ITOR'2022
 
-double RUN_CKS_WITH_TIME_LIMIT = 3600.0;
+double RUN_CKS_WITH_TIME_LIMIT = 600.0;
 
-bool DEDICATED_LP_RELAXATION = true;
+bool DEDICATED_LP_RELAXATION = false;
 double DEDICATED_LPR_TIME_LIMIT = 300;
 bool DEDICATED_LPR_GRB_CUTS_OFF = false;
 
 bool WRITE_LATEX_TABLE_ROW = true;
-string LATEX_TABLE_FILE_PATH = string("xp9msi.dat");
+string LATEX_TABLE_FILE_PATH = string("xp1dimacs.dat");
 
 int main(int argc, char **argv)
 {
