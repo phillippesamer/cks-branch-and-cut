@@ -19,14 +19,14 @@ using namespace std;
 // execution switches
 bool CONVEX_RECOLORING_INSTANCE = false;   // e.g. as of ITOR'2022
 
-double RUN_CKS_WITH_TIME_LIMIT = 600.0;
+double RUN_CKS_WITH_TIME_LIMIT = 1800.0;
 
-bool DEDICATED_LP_RELAXATION = false;
+bool DEDICATED_LP_RELAXATION = true;
 double DEDICATED_LPR_TIME_LIMIT = 300;
 bool DEDICATED_LPR_GRB_CUTS_OFF = false;
 
 bool WRITE_LATEX_TABLE_ROW = true;
-string LATEX_TABLE_FILE_PATH = string("xp1dimacs.dat");
+string LATEX_TABLE_FILE_PATH = string("xp1.dat");
 
 int main(int argc, char **argv)
 {
@@ -128,7 +128,9 @@ int main(int argc, char **argv)
                                model->get_mip_runtime(),
                                model->get_mip_num_nodes(),
                                model->get_mip_msi_counter(),
-                               model->get_mip_indegree_counter());
+                               model->get_mip_indegree_counter(),
+                               model->get_mip_gsci_counter(),
+                               model->get_mip_multiway_counter());
 
         instance->write_summary_info(LATEX_TABLE_FILE_PATH);
     }

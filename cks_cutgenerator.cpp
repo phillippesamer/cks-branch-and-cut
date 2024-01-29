@@ -3,13 +3,12 @@
 /// algorithm setup switches
 
 bool SEPARATE_MSI = true;               // MSI = minimal separator inequalities
-bool SEPARATE_INDEGREE = false;
+bool SEPARATE_INDEGREE = true;
 bool SEPARATE_GSCI = true;              // GSCI = generalized single-class ineq. NB! CURRENTLY SKIPPING INDEGREE CUTS IF AN GSCI WAS FOUND!
 bool SEPARATE_MULTIWAY = true;          // MULTIWAY = multiclass inequalities defined by multiway cuts of a stable set
 
-bool INDEGREE_AT_ROOT_ONLY = true;
-
 // strategy for running separation algorithms for colour-specific inequalities
+bool INDEGREE_AT_ROOT_ONLY = false;
 bool SEARCH_ALL_COLOURS_FOR_INDEGREE = true;
 bool MSI_STRATEGY_FIRST_CUT_BELOW_ROOT = true;
 bool GSCI_ADD_EACH_CUT_ON_ALL_COLOURS = false;
@@ -27,6 +26,7 @@ const double MSI_EPSILON = 1e-5;
 const double MSI_ZERO = MSI_EPSILON;
 const double MSI_ONE = 1.0 - MSI_EPSILON;
 const double INDEGREE_EPSILON = 1e-5;
+const double MULTIWAY_EPSILON = 1e-5;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1709,14 +1709,21 @@ bool CKSCutGenerator::separate_multiway(vector<GRBLinExpr> &cuts_lhs,
     vector<bool> stab_mask = vector<bool>(num_vertices, false);
     vector<long> components = vector<long>(num_vertices, -1);
 
-    long num_components = get_stab_from_separator(instance->graph->adj_list,
-                                                  full_weight,
-                                                  Z_mask,
-                                                  stab,
-                                                  stab_mask,
-                                                  components);
+    get_stab_from_separator(instance->graph->adj_list,
+                            full_weight,
+                            Z_mask,
+                            stab,
+                            stab_mask,
+                            components);
     #ifdef DEBUG_MI
         // assert G-Z has more than one connected component
+        long num_components = 0;
+        for(long u=0; u<num_vertices; ++u) 
+            if (components.at(u) > num_components)
+                num_components = components.at(u);
+
+        ++num_components;   // indexing starts from 0
+
         if (num_components <= 1)
             cout << right << setw(70) << "### MI: ERROR - G - Z has " << num_components << " components" << endl;
 
@@ -1741,9 +1748,6 @@ bool CKSCutGenerator::separate_multiway(vector<GRBLinExpr> &cuts_lhs,
             }
         }
     #endif
-
-    // TO DO: Do we need to assume that SS includes at least one vertex from each of V1 and V2?
-    // TO DO: Think if we should do anything about vertices at zero?
 
     // 4. SETUP THE MULTIWAY INEQUALITY ON S AND Z
 
@@ -1782,14 +1786,14 @@ bool CKSCutGenerator::separate_multiway(vector<GRBLinExpr> &cuts_lhs,
     }
 
     // found a violated inequality?
-    if (lhs > num_subgraphs + MSI_EPSILON)
+    if (lhs > num_subgraphs + MULTIWAY_EPSILON)
     {
         #ifdef DEBUG_MI
             cout << right << setw(70) << "### MI: ADDED MULTIWAY CUT ON |S| = "
                  << S_size << ", |Z| = " << Z_size << ", and beta = " << beta
                  << " (violation = " << lhs - num_subgraphs << ")" << endl;
 
-            cout << right << setw(40) << "[multiway cuts found so far: "
+            cout << right << setw(70) << "[multiway cuts found so far: "
                  << this->multiway_counter << "]" << endl;
         #endif
 

@@ -417,7 +417,9 @@ void IO::save_ip_info(double lb,
                       double time,
                       long node_count,
                       long msi_count,
-                      long indegree_count)
+                      long indegree_count,
+                      long gsci_count,
+                      long multiway_count)
 {
     /// save mip info: lb ub gap time #nodes #msi #indegree
 
@@ -442,6 +444,10 @@ void IO::save_ip_info(double lb,
     summary_info << setw(8) << msi_count;
     summary_info << setw(8) << "  &  ";
     summary_info << setw(8) << indegree_count;
+    summary_info << setw(8) << "  &  ";
+    summary_info << setw(8) << gsci_count;
+    summary_info << setw(8) << "  &  ";
+    summary_info << setw(8) << multiway_count;
     summary_info << setw(8) << "  \\\\  ";
 
     #ifdef DEBUG
@@ -458,7 +464,7 @@ void IO::write_summary_info(string output_file_path)
     if (xpfile.is_open())
     {
         xpfile << summary_info.str();
-        xpfile << endl;
+        //xpfile << endl;
         xpfile.close();
     }
     else

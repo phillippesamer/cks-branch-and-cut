@@ -53,6 +53,8 @@ public:
     long get_mip_num_nodes();
     long get_mip_msi_counter();
     long get_mip_indegree_counter();
+    long get_mip_gsci_counter();
+    long get_mip_multiway_counter();
 
 protected:
     IO *instance;

@@ -504,16 +504,16 @@ bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off
                 delete[] solution_output;
             #endif
 
-            cout << "Minimal separator inequalities added: "
+            cout << "[LPR] Minimal separator inequalities added: "
                  <<  cutgen->minimal_separators_counter << endl;
 
-            cout << "Indegree inequalities added: "
+            cout << "[LPR] Indegree inequalities added: "
                  << cutgen->indegree_counter << endl;
 
-            cout << "Generalized single-colour inequalities added: "
+            cout << "[LPR] Generalized single-colour inequalities added: "
                  <<  cutgen->gsci_counter << endl;
 
-            cout << "Multiway inequalities added: "
+            cout << "[LPR] Multiway inequalities added: "
                  <<  cutgen->multiway_counter << endl;
 
             long num_frac_vars = 0;
@@ -599,4 +599,14 @@ long CKSModel::get_mip_msi_counter()
 long CKSModel::get_mip_indegree_counter()
 {
     return cutgen->indegree_counter;
+}
+
+long CKSModel::get_mip_gsci_counter()
+{
+    return cutgen->gsci_counter;
+}
+
+long CKSModel::get_mip_multiway_counter()
+{
+    return cutgen->multiway_counter;
 }
