@@ -201,6 +201,9 @@ int CKSModel::solve(bool logging)
 
             cout << "Generalized single-colour inequalities added: "
                  <<  cutgen->gsci_counter << endl;
+
+            cout << "Multiway inequalities added: "
+                 <<  cutgen->multiway_counter << endl;
         }
 
         return this->save_optimization_status();
@@ -509,6 +512,9 @@ bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off
 
             cout << "Generalized single-colour inequalities added: "
                  <<  cutgen->gsci_counter << endl;
+
+            cout << "Multiway inequalities added: "
+                 <<  cutgen->multiway_counter << endl;
 
             long num_frac_vars = 0;
             for (long u = 0; u < instance->graph->num_vertices; ++u)

@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <map>
 #include <set>
+#include <cmath>
 
 #include "gurobi_c++.h"
 
@@ -92,6 +93,7 @@ protected:
     long multiway_counter;
     bool run_multiway_separation(int);
     bool separate_multiway(vector<GRBLinExpr> &, vector<long> &);
+    double maximum_weight;
 };
 
 #endif

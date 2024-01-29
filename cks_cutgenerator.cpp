@@ -120,6 +120,77 @@ double inline get_common_out_neighbours(long v1,
     return total;
 }
 
+void inline dfs_picking_stab_avoiding_separator(long u,
+                                                long count, 
+                                                vector<long> &components, 
+                                                vector< list<long> > &adj_list,
+                                                vector<double> &weights,
+                                                vector<bool> &Z_mask,
+                                                long &largest_vertex,
+                                                double &largest_weight)
+{
+    // auxiliary dfs to get_stab_from_separator
+
+    components[u] = count;
+
+    const long degree = adj_list[u].size();
+    list<long>::iterator it = adj_list[u].begin();
+
+    for (long i = 0; i < degree; ++i)
+    {
+        long v = *it;
+        if (Z_mask.at(v) == false) // v not removed
+        {
+            if (components[v] < 0)
+            {
+                double weight_of_v = weights.at(v);
+                if (weight_of_v > largest_weight)
+                {
+                    largest_vertex = v;
+                    largest_weight = weight_of_v;
+                }
+
+                dfs_picking_stab_avoiding_separator(v, count, components, adj_list, weights, Z_mask, largest_vertex, largest_weight);
+            }
+        }
+
+        ++it;
+    }
+}
+
+long inline get_stab_from_separator(vector< list<long> > &adj_list,
+                                    vector<double> &weights,
+                                    vector<bool> &Z_mask,            // separator
+                                    vector<long> &stab,              // output stab here
+                                    vector<bool> &stab_mask,         // output stab (as bitmap) here (expecting initialized)
+                                    vector<long> &components)        // output component of each vertex here (expecting initialized)
+{
+    /// start dfs in the graph without vertice marked in Z_mask, storing the largest weight vertex in each component in stab
+
+    long count = 0;
+    const long n = adj_list.size();
+
+    for (long u = 0; u < n; ++u)
+    {
+        if (Z_mask.at(u) == false) // vertex not removed
+        {
+            if (components[u] < 0)
+            {
+                long largest_vertex = u;
+                double largest_weight = weights.at(u);
+                dfs_picking_stab_avoiding_separator(u, count, components, adj_list, weights, Z_mask, largest_vertex, largest_weight);
+
+                stab.push_back(largest_vertex);
+                stab_mask.at(largest_vertex) = true;
+
+                ++count;
+            }
+        }
+    }
+
+    return count;    
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 void CKSCutGenerator::check_integrality()
@@ -173,6 +244,13 @@ CKSCutGenerator::CKSCutGenerator(GRBModel *model, GRBVar **x_vars, IO *instance)
     this->gsci_current_colour = 0;
     this->gsci_current_starting_v1 = 0;
     this->multiway_counter = 0;
+
+    // maximum weight of a vertex in the input (used in the separation of multiway ineq.)
+    double tmp = instance->graph->w.front();
+    for (long u=0; u < num_vertices; ++u)
+        if (instance->graph->w.at(u) > tmp)
+            tmp = instance->graph->w.at(u);
+    this->maximum_weight = tmp;
 }
 
 void CKSCutGenerator::callback()
@@ -1428,27 +1506,298 @@ bool CKSCutGenerator::separate_multiway(vector<GRBLinExpr> &cuts_lhs,
     /***
      * Separation heuristic for (multiple colours) multiway inequalities
      * 
-     * Let the weight of each vertex u be defined as f(u) = x_val[u][0] + ... +
-     * x_val[u][num_subgraphs].
-     * 1. Find a separating set Z (i.e. G-Z has more than one connected
-     * component) of minimum f-weight
-     * 2. Choose a vertex of maximum weight in each component of G-Z to
+     * 1. Let the weight of each vertex u be defined as f(u) = x_val[u][0] + ...
+     * + x_val[u][num_subgraphs].
+     * 2. Find a vertex separator (= vertex cut) Z \subset V (i.e. G-Z has more
+     * than one connected component) of minimum f-weight
+     * 3. Choose a vertex of maximum weight in each component of G-Z to
      * determine stable set S
      * 
-     * To solve 1, we proceed as indicated in "The vertex separator problem - a
-     * polyhedral investigation" (Balas and Souza, 2005); see the third
-     * paragraph in page 2 (wlog, we define k = 1 in b(n) = n-k).
+     * --
      * 
-     * 1a. Create the bipartite auxiliary graph H = (V1 \cup V2, F) s.t.
+     * To solve 2, we proceed as indicated in "The vertex separator problem - a
+     * polyhedral investigation" (Balas and Souza, 2005); see the third
+     * paragraph in page 2 (defining k = 1 in b(n) = n-k).
+     * 
+     * 2a. Create the bipartite auxiliary graph H = (V1 \cup V2, F) s.t.
+     * - for each u in V(G), there are u1 in V1 and u2 in V2
+     * - for each u in V(G), there is {u1, u2} in F=E(H)
+     * - for each {u,v} in E(G), there are {u1, v2} and {v1, u2} in F=E(H)
+     * 
+     * 2b. Find a max-weight stable set SS in H (with original weights assigned
+     * to both corresponding vertices in H) via max-flow min-cut; see
+     * Section 2 in "A combinatorial algorithm for weighted stable sets in
+     * bipartite graphs" (Faigle and Frahling, 2006)
+     * 
+     * 2c. The min-weight separator Z is determined by those vertices u without
+     * a correspondent one (u1 or u2) in SS, thus a vertex cover in H (note: we
+     * do not miss an edge of the original graph, and what is in SS was stable
+     * anyway).
+     */
+
+    // 1. WEIGHT SUM OVER ALL COLOURS
+
+    vector<double> full_weight = vector<double>(num_vertices, 0.);
+
+    for (long u=0; u < num_vertices; ++u)
+    {
+        double u_sum = 0.;
+        
+        for (long c=0; c < num_subgraphs; ++c)
+            u_sum += x_val[u][c];
+
+        full_weight[u] = u_sum;
+    }
+
+    /***
+     * 2A. AUXILIARY (BIPARTITE) GRAPH H = (V1 \cup V2, F)
      * - for each u in H, there are u1 in V1 and u2 in V2
      * - for each u in H, there is {u1, u2} in F=E(H)
      * - for each {u,v} in E = E(G), there are {u1, v2} and {v1, u2} in F=E(H)
-     * 
-     * 1b. Solve the max-weight stable set problem in H (with original weights
-     * assigned to both corresponding vertices in H) in O(n^4) via max-weight
-     * bipartite matching; see:
-     * https://ali-ibrahim137.github.io/competitive/programming/2020/01/02/maximum-independent-set-in-bipartite-graphs.html
+     * THEN, LET D DENOTE THE NETWORK OBTAINED FROM H, ADDING AN ARTICIAL SOURCE
+     * AND SINK VERTICES, ORIENT ALL EDGES IN H FROM V2 TO V1, AND ARCS FROM
+     * SOURCE TO ALL VERTICES IN V2, AND FROM ALL OF V1 INTO THE SINK.
      */
 
-    return (cuts_lhs.size() > 0);
+    SmartDigraph D;
+    vector<SmartDigraph::Node> D_vertices;
+    map<pair<long,long>, SmartDigraph::Arc> D_arcs;
+    SmartDigraph::ArcMap<double> D_capacity(D);
+    long D_size = 0;
+
+    const long UNLIMITED_CAPACITY = num_vertices * num_subgraphs * ((long) ceil(this->maximum_weight));
+
+    // maps u->u_1, while u_2 = D_idx_of_vertex[u]+1; artificial source and sink at the end
+    vector<long> D_idx_of_vertex = vector<long>(num_vertices+2, -1);
+
+    // for each u in V(G), add two vertices u_1, u_2 in D, and the arc u2->u1
+    for (long u = 0; u < num_vertices; ++u)
+    {
+        D_vertices.push_back(D.addNode());
+        D_vertices.push_back(D.addNode());
+        D_idx_of_vertex[u] = D_size;
+        D_size += 2;
+
+        long u1 = D_idx_of_vertex[u];
+        long u2 = D_idx_of_vertex[u]+1;
+        pair<long,long> u2u1 = make_pair(u2,u1);
+
+        D_arcs[u2u1] = D.addArc(D_vertices[u2], D_vertices[u1]);
+
+        D_capacity[ D_arcs[u2u1] ] = UNLIMITED_CAPACITY;
+    }
+
+    // for each {u,v} in E(G), add arcs v2->u1 and u2->v1
+    for (long idx=0; idx < num_edges; ++idx)
+    {
+        long u = instance->graph->s.at(idx);
+        long v = instance->graph->t.at(idx);
+
+        long u1 = D_idx_of_vertex[u];
+        long u2 = D_idx_of_vertex[u]+1;
+        long v1 = D_idx_of_vertex[v];
+        long v2 = D_idx_of_vertex[v]+1;
+
+        pair<long,long> v2u1 = make_pair(v2,u1);
+        D_arcs[v2u1] = D.addArc(D_vertices[v2], D_vertices[u1]);
+        D_capacity[ D_arcs[v2u1] ] = UNLIMITED_CAPACITY;
+
+        pair<long,long> u2v1 = make_pair(u2,v1);
+        D_arcs[u2v1] = D.addArc(D_vertices[u2], D_vertices[v1]);
+        D_capacity[ D_arcs[u2v1] ] = UNLIMITED_CAPACITY;
+    }
+
+    // additional source and sink vertices
+    D_vertices.push_back(D.addNode());
+    D_vertices.push_back(D.addNode());
+    long D_source = num_vertices;
+    long D_sink = num_vertices + 1;
+    D_idx_of_vertex[D_source] = D_size;
+    D_idx_of_vertex[D_sink] = D_size+1;
+    D_size += 2;
+
+    // additional arcs from source to u2, and from u1 to the sink, for all u in V(G)
+    for (long u = 0; u < num_vertices; ++u)
+    {
+        long u1 = D_idx_of_vertex[u];
+        long u2 = D_idx_of_vertex[u]+1;
+
+        pair<long,long> source_u2 = make_pair(D_source,u2);
+        D_arcs[source_u2] = D.addArc(D_vertices[D_source], D_vertices[u2]);
+        D_capacity[ D_arcs[source_u2] ] = full_weight.at(u);
+
+        pair<long,long> u1_sink = make_pair(u1,D_sink);
+        D_arcs[u1_sink] = D.addArc(D_vertices[u1], D_vertices[D_sink]);
+        D_capacity[ D_arcs[u1_sink] ] = full_weight.at(u);
+    }
+
+    /***
+     * 2B. FIND A MAX WEIGHT STABLE SET SS IN H VIA MINCUT IN THE ORIENTED NETWORK D
+     * Using the first phase of Goldberg & Tarjan preflow push-relabel algorithm
+     * (with "highest label" and "bound decrease" heuristics). The worst case
+     * time complexity of the algorithm is in O(n^2 * m^0.5), n and m wrt D
+     */
+
+    Preflow<SmartDigraph, SmartDigraph::ArcMap<double> > preflow(D,
+                                                                 D_capacity,
+                                                                 D_vertices[D_source],
+                                                                 D_vertices[D_sink]);
+    preflow.runMinCut();
+    
+    /***
+     * From a cut (S,T) of finite capacity z in D, we obtain a stable set SS of
+     * weight \sum_{u \in V(H)} full_weight[u] - z in H, determined by
+     * SS = (S \cap V2) \cup (T \cap V1)
+     */
+
+    vector<long> SS = vector<long>();
+    vector<bool> SS_mask = vector<bool>(num_vertices, false);
+
+    for (long u=0; u < num_vertices; ++u)
+    {
+        long u1 = D_idx_of_vertex[u];
+        long u2 = D_idx_of_vertex[u] + 1;
+
+        // query if u2 is on the source side (or u1 on the sink side) of the min cut
+        if ( preflow.minCut(D_vertices[u2]) || !preflow.minCut(D_vertices[u1]))
+        {
+            SS.push_back(u);
+            SS_mask.at(u) = true;
+        }
+    }
+
+    #ifdef DEBUG_MI
+        // assert size
+        if (SS.size() <= 1)
+            cout << right << setw(70) << "### MI: SS in H has size " << SS.size() << endl;
+
+        // assert stab weight as expected
+        double stab_weight = 0;
+        for (vector<long>::iterator it = SS.begin(); it != SS.end(); ++it)
+            stab_weight += full_weight.at(*it);
+
+        double sum_all_weights = 0;
+        for (long u=0; u < num_vertices; ++u)
+            sum_all_weights += full_weight.at(u);
+
+        double mincut = preflow.flowValue();
+        double lb = 2*sum_all_weights - mincut -0.01; // twice because of u1 and u2 in H, for each u in G
+        double ub = 2*sum_all_weights + mincut + 0.01;
+        if (stab_weight < lb || stab_weight > ub)
+            cout << right << setw(70) << "### MI: SS has weight " << stab_weight
+                 << ", while we expected (2*" << sum_all_weights
+                 << " - " << mincut << ")" << endl;
+    #endif
+
+    // 2C. MIN-WEIGHT SEPARATOR Z: THE COMPLEMENT OF SS
+
+    vector<long> separator_Z = vector<long>();
+    vector<bool> Z_mask = vector<bool>(num_vertices, false);
+
+    for (long u=0; u < num_vertices; ++u)
+    {
+        if (SS_mask.at(u) == false)
+        {
+            separator_Z.push_back(u);
+            Z_mask.at(u) = true;
+        }
+    }
+
+    // 3. DETERMINE STABLE SET S BY TAKING A VERTEX OF MAXIMUM WEIGHT IN EACH COMPONENT OF G-Z
+
+    vector<long> stab = vector<long>();
+    vector<bool> stab_mask = vector<bool>(num_vertices, false);
+    vector<long> components = vector<long>(num_vertices, -1);
+
+    long num_components = get_stab_from_separator(instance->graph->adj_list,
+                                                  full_weight,
+                                                  Z_mask,
+                                                  stab,
+                                                  stab_mask,
+                                                  components);
+    #ifdef DEBUG_MI
+        // assert G-Z has more than one connected component
+        if (num_components <= 1)
+            cout << right << setw(70) << "### MI: ERROR - G - Z has " << num_components << " components" << endl;
+
+        // assert stab is a stable set
+        for (vector<long>::iterator it_u = stab.begin(); it_u != stab.end(); ++it_u)
+        {
+            long u = *it_u;
+
+            bool failure = false;
+            list<long>::iterator it_v = instance->graph->adj_list.at(u).begin();
+            while (it_v != instance->graph->adj_list.at(u).end() && !failure)
+            {
+                long v = *it_v;
+
+                if (stab_mask.at(v))
+                {
+                    failure = true;
+                    cout << right << setw(70) << "### MI: ERROR - S is not a stable set!" << endl;
+                }
+
+                ++it_v;
+            }
+        }
+    #endif
+
+    // TO DO: Do we need to assume that SS includes at least one vertex from each of V1 and V2?
+    // TO DO: Think if we should do anything about vertices at zero?
+
+    // 4. SETUP THE MULTIWAY INEQUALITY ON S AND Z
+
+    long S_size = stab.size();
+    long Z_size = separator_Z.size();
+
+    // coefficient of vertices in the separator
+    long beta = S_size - num_subgraphs;
+    if (beta < 0)
+        beta = 0;
+
+    double lhs = 0.;
+
+    GRBLinExpr violated_constr = 0;
+
+    // vertices in the stable set S
+    for (long idx=0; idx < S_size; ++idx)
+    {
+        long v = stab.at(idx);
+        for (long c=0; c < num_subgraphs; ++c)
+        {
+            lhs += x_val[v][c];
+            violated_constr += x_vars[v][c];
+        }
+    }
+
+    // vertices in the separator Z
+    for (long idx=0; idx < Z_size; ++idx)
+    {
+        long z = separator_Z.at(idx);
+        for (long c=0; c < num_subgraphs; ++c)
+        {
+            lhs += (-1 * beta * x_val[z][c]);
+            violated_constr += (-1 * beta * x_vars[z][c]);
+        }
+    }
+
+    // found a violated inequality?
+    if (lhs > num_subgraphs + MSI_EPSILON)
+    {
+        #ifdef DEBUG_MI
+            cout << right << setw(70) << "### MI: ADDED MULTIWAY CUT ON |S| = "
+                 << S_size << ", |Z| = " << Z_size << ", and beta = " << beta
+                 << " (violation = " << lhs - num_subgraphs << ")" << endl;
+
+            cout << right << setw(40) << "[multiway cuts found so far: "
+                 << this->multiway_counter << "]" << endl;
+        #endif
+
+        cuts_lhs.push_back(violated_constr);
+        cuts_rhs.push_back(num_subgraphs);
+
+        return true;
+    }
+    else
+        return false;
 }
