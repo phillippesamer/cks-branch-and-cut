@@ -3,8 +3,8 @@
 /// algorithm setup switches
 
 bool SEPARATE_MSI = true;               // MSI = minimal separator inequalities
-bool SEPARATE_INDEGREE = true;
-bool SEPARATE_GSCI = true;              // GSCI = generalized single-class ineq. NB! CURRENTLY SKIPPING INDEGREE CUTS IF AN GSCI WAS FOUND!
+bool SEPARATE_INDEGREE = false;         // NB! SHOULD BE FALSE IF SEPARATE_GSCI (WHICH IS MORE GENERAL) IS TRUE
+bool SEPARATE_GSCI = true;              // GSCI = generalized single-class ineq.
 bool SEPARATE_MULTIWAY = true;          // MULTIWAY = multiclass inequalities defined by multiway cuts of a stable set
 
 // strategy for running separation algorithms for colour-specific inequalities
@@ -370,7 +370,7 @@ bool CKSCutGenerator::separate_lpr()
         if (SEPARATE_GSCI)
             gsci_cut = run_gsci_separation(ADD_STD_CNTRS);
 
-        if (SEPARATE_INDEGREE && !gsci_cut)
+        if (SEPARATE_INDEGREE)
             indegree_cut = run_indegree_separation(ADD_STD_CNTRS);
 
         if (SEPARATE_MSI)
@@ -466,7 +466,8 @@ bool CKSCutGenerator::separate_indegree(vector<GRBLinExpr> &cuts_lhs,
         {
             long u = instance->graph->s.at(idx);
             long v = instance->graph->t.at(idx);
-            if (x_val[u][colour] >= x_val[v][colour])
+            if ( x_val[u][colour]  > x_val[v][colour] ||
+                (x_val[u][colour] == x_val[v][colour] && u<v) )
                 indegree.at(v) += 1;
             else
                 indegree.at(u) += 1;
@@ -1227,7 +1228,7 @@ bool CKSCutGenerator::run_gsci_separation(int kind_of_cut)
         // add cuts
         for (unsigned long idx = 0; idx<cuts_lhs.size(); ++idx)
         {
-            ++gsci_counter;
+            // NB! cut counter updated inside method (to distinguish GSCI and indegree)
 
             if (kind_of_cut == ADD_USER_CUTS)
                 addCut(cuts_lhs[idx] <= cuts_rhs[idx]);
@@ -1362,8 +1363,23 @@ bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
                 ++num_trials;
             }
 
-            // 4. FOUND A VIOLATED GSCI BASED ON THIS COLOUR?
-            if(pairs.size() > 0)
+            // 4. CHECK GSCI IF ANY PAIRS WERE FOUND; OTHERWISE, CHECK FOR INDEGREE
+            if(pairs.empty())
+            {
+                if (lhs_of_std_indegree > 1 + INDEGREE_EPSILON)
+                {
+                    // store inequality (caller method adds it to the model)
+                    GRBLinExpr violated_constr = 0;
+
+                    for (long u = 0; u < num_vertices; ++u)
+                        violated_constr += ( (1 - indegree.at(u)) * x_vars[u][colour] );
+
+                    cuts_lhs.push_back(violated_constr);
+                    cuts_rhs.push_back(1);
+                    ++indegree_counter;
+                }
+            }
+            else
             {
                 // fill up information for vertices that will remain in singletons
                 long num_of_classes = pairs.size();
@@ -1441,6 +1457,7 @@ bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
 
                         cuts_lhs.push_back(violated_constr);
                         cuts_rhs.push_back(1);
+                        ++gsci_counter;
 
                         ++cuts_added;
                         c = (c+1) % num_subgraphs;
@@ -1448,9 +1465,8 @@ bool CKSCutGenerator::separate_gsci(vector<GRBLinExpr> &cuts_lhs,
                         if (GSCI_ADD_EACH_CUT_ON_ALL_COLOURS == false)
                             done = true;
                     }
-
-                } // lhs > 1
-            }
+                }
+            } // pairs.empty() i.e. indegree vs. GSCI
         }
 
         // move to the next colour (unless done)

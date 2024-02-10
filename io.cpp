@@ -411,6 +411,34 @@ void IO::save_lpr_info(double lp_bound, double lp_time)
     #endif
 }
 
+void IO::save_lpr_info_with_counters(double lp_bound,
+                                     double lp_time,
+                                     long msi_count,
+                                     long indegree_count,
+                                     long gsci_count,
+                                     long multiway_count)
+{
+    /// save lp relaxation info: bound time
+    summary_info << setw(8) << fixed << setprecision(2) << lp_bound;
+    summary_info << setw(8) << "  &  ";
+    summary_info << setw(8) << fixed << setprecision(2) << lp_time;
+    summary_info << setw(8) << "  &  ";
+    summary_info << setw(8) << msi_count + indegree_count + gsci_count + multiway_count;
+    summary_info << setw(8) << "  &&  ";
+    summary_info << setw(8) << msi_count;
+    summary_info << setw(8) << "  &  ";
+    summary_info << setw(8) << indegree_count;
+    summary_info << setw(8) << "  &  ";
+    summary_info << setw(8) << gsci_count;
+    summary_info << setw(8) << "  &  ";
+    summary_info << setw(8) << multiway_count;
+
+    #ifdef DEBUG
+        cout << "save_lpr_info got: " << endl;
+        cout << summary_info.str() << endl;
+    #endif
+}
+
 void IO::save_ip_info(double lb,
                       double ub,
                       double gap,
@@ -448,7 +476,6 @@ void IO::save_ip_info(double lb,
     summary_info << setw(8) << gsci_count;
     summary_info << setw(8) << "  &  ";
     summary_info << setw(8) << multiway_count;
-    summary_info << setw(8) << "  \\\\  ";
 
     #ifdef DEBUG
         cout << "save_ip_info got: " << endl;
@@ -460,11 +487,13 @@ void IO::write_summary_info(string output_file_path)
 {
     /// write all the saved info as a line in the given file
 
+    summary_info << setw(8) << "  \\\\  ";
+    summary_info << endl;
+
     ofstream xpfile(output_file_path.c_str(), ofstream::app);
     if (xpfile.is_open())
     {
         xpfile << summary_info.str();
-        //xpfile << endl;
         xpfile.close();
     }
     else

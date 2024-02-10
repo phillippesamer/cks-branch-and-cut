@@ -23,6 +23,10 @@ CKSModel::CKSModel(IO *instance)
     this->solution_runtime = -1;
 
     this->lp_bound = this->lp_runtime = this->lp_passes = -1;
+    this->lpr_msi_count = 0;
+    this->lpr_indegree_count = 0;
+    this->lpr_gsci_count = 0;
+    this->lpr_multiway_count = 0;
 
     try
     {
@@ -398,12 +402,14 @@ void CKSModel::fill_solution_vectors()
     delete[] solution_output;
 }
 
-bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off)
+bool CKSModel::solve_lp_relax(bool logging,
+                              double time_limit,
+                              long max_passes_at_same_obj,
+                              bool grb_cuts_off)
 {
     /***
      * Solves the LP relaxation of the full IP formulation for connected
-     * k-subpartitions, including indegree and minimal separator inequalities.
-     * Returns true iff the bound was computed successfully.
+     * k-subpartitions. Returns true iff the bound was computed successfully.
      */
 
     try
@@ -435,10 +441,17 @@ bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off
         this->lp_passes = 1;
         this->lp_runtime = model->get(GRB_DoubleAttr_Runtime);
 
-        while (model_updated && model->get(GRB_IntAttr_Status) == GRB_OPTIMAL)
+        bool max_passes_exceeded = false;
+        long repeated_obj_counter = 0;
+
+        while (model_updated &&
+               model->get(GRB_IntAttr_Status) == GRB_OPTIMAL &&
+               max_passes_exceeded == false)
         {
+            double last_lpr_val = model->get(GRB_DoubleAttr_ObjVal);
+
             cout << "LP relaxation pass #" << lp_passes << " (bound = "
-                 << model->get(GRB_DoubleAttr_ObjVal) << ", runtime: "
+                 << last_lpr_val << ", runtime: "
                  << this->lp_runtime << ")" << endl;
 
             // cut generator object used only to find violated inequalities;
@@ -461,8 +474,25 @@ bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off
 
                 if (this->lp_runtime > time_limit)
                 {
-                    cout << endl << "[LPR] Time limit exceeded" << endl;
                     model_updated = false;
+                    cout << endl << "[LPR] Time limit exceeded" << endl;
+                }
+
+                double new_lpr_val = model->get(GRB_DoubleAttr_ObjVal);
+                bool repeated_val = (new_lpr_val >= last_lpr_val - EPSILON_TOL) &&
+                                    (new_lpr_val <= last_lpr_val + EPSILON_TOL);
+
+                if (repeated_val)
+                    ++repeated_obj_counter;
+                else
+                    repeated_obj_counter = 0;
+
+                if (repeated_obj_counter > max_passes_at_same_obj)
+                {
+                    max_passes_exceeded = true;
+                    cout << endl << "[LPR] Quitting after "
+                         << max_passes_at_same_obj
+                         << " passes without improvement" << endl;
                 }
             }
         }
@@ -504,6 +534,11 @@ bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off
                 delete[] solution_output;
             #endif
 
+            this->lpr_msi_count = cutgen->minimal_separators_counter;
+            this->lpr_indegree_count = cutgen->indegree_counter;
+            this->lpr_gsci_count = cutgen->gsci_counter;
+            this->lpr_multiway_count = cutgen->multiway_counter;
+
             cout << "[LPR] Minimal separator inequalities added: "
                  <<  cutgen->minimal_separators_counter << endl;
 
@@ -528,10 +563,10 @@ bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off
             }
             if (num_frac_vars > 0)
             {
-                cout << "[LPR] " << num_frac_vars << " fractional variables" << endl;
+                cout << "[LPR] " << num_frac_vars << " fractional variables" << endl << endl;
             }
             else
-                cout << "[LPR] integer feasible solution" << endl;
+                cout << "[LPR] integer feasible solution" << endl << endl;
 
             // restore IP model
             model->set(GRB_IntParam_Cuts, -1);
@@ -546,14 +581,14 @@ bool CKSModel::solve_lp_relax(bool logging, double time_limit, bool grb_cuts_off
         else if (model->get(GRB_IntAttr_Status) == GRB_INFEASIBLE)
         {
             cout << "LP relaxation infeasible!" << endl;
-            cout << "Model runtime: " << lp_runtime << endl;
+            cout << "Model runtime: " << lp_runtime << endl << endl;
             return false;
         }
         else
         {
             cout << "Unexpected error: solve_lp_relax() got neither optimal "
                  << "nor infeasible model" << endl;
-            cout << "Model runtime: " << lp_runtime << endl;
+            cout << "Model runtime: " << lp_runtime << endl << endl;
             return false;
         }
     }

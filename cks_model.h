@@ -40,10 +40,14 @@ public:
     ModelStatus solution_status;
     double solution_runtime;
 
-    bool solve_lp_relax(bool, double, bool);
+    bool solve_lp_relax(bool, double, long, bool);
     double lp_bound;
     double lp_runtime;
     long lp_passes;
+    long lpr_msi_count;
+    long lpr_indegree_count;
+    long lpr_gsci_count;
+    long lpr_multiway_count;
 
     void set_time_limit(double);
 

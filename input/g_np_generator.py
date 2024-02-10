@@ -9,11 +9,12 @@ import matplotlib.pyplot as plt
 import os
 
 # five G(n,p) random graphs, for p in {0.01, 0.02, ..., 0.25}
-n = 100
-percentual_rates = range(1, 26, 1)      # q \in 1, 2, ..., 25 => p \in 0.01, 0.02, ... , 0.25
+n = 1000
+percentual_rates = range(1, 6, 1)      # q \in 1, 2, ..., 25 => p \in 0.01, 0.02, ... , 0.25
 num_examples = 5
+max_weight = 10
 make_figures = False
-destination_folder = "./alternate_g_np_100"
+destination_folder = "./g_np_1000"
 
 if not os.path.exists(destination_folder):
     os.makedirs(destination_folder)
@@ -31,20 +32,20 @@ for q in percentual_rates:
         m = G.number_of_edges()
         
         #vertex_weights = random.sample(range(1, 101), n)        # all different
-        vertex_weights = [random.randint(1,100) for u in range(n)]
+        vertex_weights = [random.randint(-1*max_weight,max_weight) for u in range(n)]
         
         filepath = f"{destination_folder}/{n}-{q}-{iteration}"
         
         # save the graph to png file
         if make_figures:
             fig = plt.figure()
-            nx.draw(G, with_labels=True, node_color=[x for x in vertex_weights], node_size=300, cmap=plt.cm.Blues)
+            nx.draw(G, with_labels=True, node_color=[x+max_weight for x in vertex_weights], node_size=300, cmap=plt.cm.Blues)
             fig.savefig( filepath + ".png" )
             plt.close(fig)
         
         # create the .gcc file
         file = open(filepath + ".gcc", "w")
-        file.write(f"# G_{n,p} (Erdos-Renyi) graph, with n = {n} and p = {p}, and non-negative vertex weights\n")
+        file.write(f"# G_{n,p} (Erdos-Renyi) graph, with n = {n} and p = {p}\n")
         file.write(f"# Example {iteration} of {num_examples}\n")
         
         file.write(f"{filepath}\n")
@@ -60,6 +61,7 @@ for q in percentual_rates:
         file.close()
 
 # number of colours (constant for each combination of n,p)
+"""
 num_rates = len(percentual_rates)
 num_components = [random.randint(2,11) for i in range(num_rates)]
 
@@ -70,3 +72,4 @@ for x in num_components:
         file.write(f"{x}\n")
 
 file.close()
+"""

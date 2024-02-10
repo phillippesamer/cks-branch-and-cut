@@ -23,10 +23,10 @@ double RUN_CKS_WITH_TIME_LIMIT = 1800.0;
 
 bool DEDICATED_LP_RELAXATION = true;
 double DEDICATED_LPR_TIME_LIMIT = 300;
+long DEDICATED_LPR_MAX_PASSES_WITHOUT_IMPROVEMENT = 100;
 bool DEDICATED_LPR_GRB_CUTS_OFF = false;
 
 bool WRITE_LATEX_TABLE_ROW = true;
-string LATEX_TABLE_FILE_PATH = string("xp1.dat");
 
 int main(int argc, char **argv)
 {
@@ -34,14 +34,14 @@ int main(int argc, char **argv)
 
     IO* instance = new IO();
 
-    if (argc < 3)
+    if (argc < 4)
     {
         cout << endl << "usage: \t" << argv[0];
         if (CONVEX_RECOLORING_INSTANCE)
-            cout << " [CR instance file] [CR solution file]" << endl << endl;
+            cout << " [CR instance file] [CR solution file] [output file path]" << endl << endl;
         else
         {
-            cout << " [.stp or .gcc input file path] [number of subgraphs] [-e]"
+            cout << " [.stp or .gcc input file path] [number of subgraphs] [output file path] [-e]"
                  << endl << endl;
             cout << " [-e]: flag indicating .stp format instance "
                  << "WITH edge weights (to be ignored)" << endl << endl;
@@ -68,7 +68,7 @@ int main(int argc, char **argv)
             cout << "### CONNECTED K-SUBPARTITION ###" << endl << endl;
 
             instance->num_subgraphs = atol(argv[2]);
-            bool stp_with_edge_weights = (argc > 3);
+            bool stp_with_edge_weights = (argc > 4);
 
             string file_path = string(argv[1]);
             string file_extension = file_path.substr(file_path.find_last_of(".")+1);
@@ -111,17 +111,27 @@ int main(int argc, char **argv)
     {
         model->solve_lp_relax(false,
                               DEDICATED_LPR_TIME_LIMIT,
+                              DEDICATED_LPR_MAX_PASSES_WITHOUT_IMPROVEMENT,
                               DEDICATED_LPR_GRB_CUTS_OFF);
 
         if (WRITE_LATEX_TABLE_ROW)
-            instance->save_lpr_info(model->lp_bound, model->lp_runtime);
+            //instance->save_lpr_info(model->lp_bound, model->lp_runtime);
+            instance->save_lpr_info_with_counters(model->lp_bound,
+                                                  model->lp_runtime,
+                                                  model->lpr_msi_count,
+                                                  model->lpr_indegree_count,
+                                                  model->lpr_gsci_count,
+                                                  model->lpr_multiway_count);
     }
 
+    /*
     model->set_time_limit(RUN_CKS_WITH_TIME_LIMIT - model->lp_runtime);
     model->solve(true);
+    */
 
     if (WRITE_LATEX_TABLE_ROW)
     {
+        /*
         instance->save_ip_info(model->solution_weight,
                                model->solution_dualbound,
                                model->get_mip_gap(),
@@ -131,8 +141,9 @@ int main(int argc, char **argv)
                                model->get_mip_indegree_counter(),
                                model->get_mip_gsci_counter(),
                                model->get_mip_multiway_counter());
+        */
 
-        instance->write_summary_info(LATEX_TABLE_FILE_PATH);
+        instance->write_summary_info(string(argv[3]));
     }
 
     delete model;
