@@ -22,9 +22,8 @@ bool CONVEX_RECOLORING_INSTANCE = false;   // e.g. as of ITOR'2022
 double RUN_CKS_WITH_TIME_LIMIT = 1800.0;
 
 bool DEDICATED_LP_RELAXATION = true;
-double DEDICATED_LPR_TIME_LIMIT = 300;
-long DEDICATED_LPR_MAX_PASSES_WITHOUT_IMPROVEMENT = 100;
-bool DEDICATED_LPR_GRB_CUTS_OFF = false;
+double DEDICATED_LPR_TIME_LIMIT = 100;
+long DEDICATED_LPR_MAX_PASSES_WITHOUT_IMPROVEMENT = 10;
 
 bool WRITE_LATEX_TABLE_ROW = true;
 
@@ -111,17 +110,21 @@ int main(int argc, char **argv)
     {
         model->solve_lp_relax(false,
                               DEDICATED_LPR_TIME_LIMIT,
-                              DEDICATED_LPR_MAX_PASSES_WITHOUT_IMPROVEMENT,
-                              DEDICATED_LPR_GRB_CUTS_OFF);
+                              DEDICATED_LPR_MAX_PASSES_WITHOUT_IMPROVEMENT);
 
         if (WRITE_LATEX_TABLE_ROW)
-            //instance->save_lpr_info(model->lp_bound, model->lp_runtime);
+        {
+            /*
+            instance->save_lpr_info(model->lp_bound, model->lp_runtime);
+            */
+            
             instance->save_lpr_info_with_counters(model->lp_bound,
                                                   model->lp_runtime,
                                                   model->lpr_msi_count,
                                                   model->lpr_indegree_count,
                                                   model->lpr_gsci_count,
                                                   model->lpr_multiway_count);
+        }
     }
 
     /*

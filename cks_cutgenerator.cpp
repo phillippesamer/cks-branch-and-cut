@@ -2,10 +2,10 @@
 
 /// algorithm setup switches
 
-bool SEPARATE_MSI = true;               // MSI = minimal separator inequalities
-bool SEPARATE_INDEGREE = false;         // NB! SHOULD BE FALSE IF SEPARATE_GSCI (WHICH IS MORE GENERAL) IS TRUE
-bool SEPARATE_GSCI = true;              // GSCI = generalized single-class ineq.
-bool SEPARATE_MULTIWAY = true;          // MULTIWAY = multiclass inequalities defined by multiway cuts of a stable set
+bool SEPARATE_MSI = true;             // MSI = minimal separator inequalities
+bool SEPARATE_INDEGREE = false;       // NB! SHOULD BE FALSE IF SEPARATE_GSCI (WHICH IS MORE GENERAL) IS TRUE
+bool SEPARATE_GSCI = true;            // GSCI = generalized single-class ineq.
+bool SEPARATE_MULTIWAY = true;        // MULTIWAY = multiclass inequalities defined by multiway cuts of a stable set
 
 // strategy for running separation algorithms for colour-specific inequalities
 bool INDEGREE_AT_ROOT_ONLY = false;
@@ -22,11 +22,11 @@ int  SEPARATION_PRECISION = 14;
 // use a tolerance in dealing with relaxation values?
 // e.g. y_u < epsilon instead of y_u == 0
 // set to 0 to stick to exact values and operators
-const double MSI_EPSILON = 1e-5;
-const double MSI_ZERO = MSI_EPSILON;
-const double MSI_ONE = 1.0 - MSI_EPSILON;
-const double INDEGREE_EPSILON = 1e-5;
-const double MULTIWAY_EPSILON = 1e-5;
+const double MSI_EPSILON = 0.5;
+const double MSI_ZERO = 1e-5;
+const double MSI_ONE = 1.0 - 1e-5;
+const double INDEGREE_EPSILON = 0.5;
+const double MULTIWAY_EPSILON = 0.5;
 
 ///////////////////////////////////////////////////////////////////////////////
 

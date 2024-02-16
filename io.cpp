@@ -361,7 +361,7 @@ void IO::save_instance_info()
 
 void IO::save_literature_info(string filename)
 {
-    /// save literature info (ITOR'2020): lb, gap, time
+    /// save literature info (ITOR'2020): time, gap, lb
 
     ifstream input_fh(filename);
     
@@ -433,6 +433,9 @@ void IO::save_lpr_info_with_counters(double lp_bound,
     summary_info << setw(8) << "  &  ";
     summary_info << setw(8) << multiway_count;
 
+    summary_info << setw(8) << "  \\\\  ";
+    summary_info << endl;
+
     #ifdef DEBUG
         cout << "save_lpr_info got: " << endl;
         cout << summary_info.str() << endl;
@@ -451,7 +454,11 @@ void IO::save_ip_info(double lb,
 {
     /// save mip info: lb ub gap time #nodes #msi #indegree
 
-    summary_info << setw(8) << fixed << setprecision(2) << lb;
+    if (lb < numeric_limits<double>::max() - 1)
+        summary_info << setw(8) << fixed << setprecision(2) << lb;
+    else
+        summary_info << setw(8) << " -- ";
+
     summary_info << setw(8) << "  &  ";
     summary_info << setw(8) << fixed << setprecision(2) << ub;
 
@@ -477,6 +484,9 @@ void IO::save_ip_info(double lb,
     summary_info << setw(8) << "  &  ";
     summary_info << setw(8) << multiway_count;
 
+    summary_info << setw(8) << "  \\\\  ";
+    //summary_info << endl;
+
     #ifdef DEBUG
         cout << "save_ip_info got: " << endl;
         cout << summary_info.str() << endl;
@@ -486,9 +496,6 @@ void IO::save_ip_info(double lb,
 void IO::write_summary_info(string output_file_path)
 {
     /// write all the saved info as a line in the given file
-
-    summary_info << setw(8) << "  \\\\  ";
-    summary_info << endl;
 
     ofstream xpfile(output_file_path.c_str(), ofstream::app);
     if (xpfile.is_open())

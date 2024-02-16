@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 
 #include "graph.h"
 

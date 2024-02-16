@@ -11,6 +11,7 @@ bool GRB_PREPROCESSING = true;    // gurobi (automatic) preprocessing on/off
 const bool GRB_HEURISTICS_FOCUS = false; // extra focus on gurobi heuristics
 
 const double EPSILON_TOL = 1e-5;
+const double LPR_TOL = 0.1;
 
 CKSModel::CKSModel(IO *instance)
 {
@@ -95,12 +96,13 @@ void CKSModel::create_constraints()
         model->addConstr(gub_ineq <= 1, cname.str());
     }
 
-    if (ORDER_COLOURS_CONSTRAINTS)
+    if (ORDER_COLOURS_CONSTRAINTS && instance->recoloring_instance == false)
     {
         /***
          * Reduces symmetry by imposing that the component induced by colour c
          * is larger than that induced by colour c+1. Also avoids solutions with
          * "empty components" between non-empty ones.
+         * NB! Does not apply to convex recoloring instances.
          */
         for (long c = 0; c < instance->num_subgraphs - 1; ++c)
         {
@@ -404,8 +406,7 @@ void CKSModel::fill_solution_vectors()
 
 bool CKSModel::solve_lp_relax(bool logging,
                               double time_limit,
-                              long max_passes_at_same_obj,
-                              bool grb_cuts_off)
+                              long max_passes_at_same_obj)
 {
     /***
      * Solves the LP relaxation of the full IP formulation for connected
@@ -414,9 +415,6 @@ bool CKSModel::solve_lp_relax(bool logging,
 
     try
     {
-        if (grb_cuts_off)
-            model->set(GRB_IntParam_Cuts, 0);
-
         if (logging == true)
             model->set(GRB_IntParam_OutputFlag, 1);
         else
@@ -479,8 +477,8 @@ bool CKSModel::solve_lp_relax(bool logging,
                 }
 
                 double new_lpr_val = model->get(GRB_DoubleAttr_ObjVal);
-                bool repeated_val = (new_lpr_val >= last_lpr_val - EPSILON_TOL) &&
-                                    (new_lpr_val <= last_lpr_val + EPSILON_TOL);
+                bool repeated_val = (new_lpr_val >= last_lpr_val - LPR_TOL) &&
+                                    (new_lpr_val <= last_lpr_val + LPR_TOL);
 
                 if (repeated_val)
                     ++repeated_obj_counter;
