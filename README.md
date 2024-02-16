@@ -50,15 +50,15 @@ Edit the Makefile initial definition of variable `GRB_PATH` to reflect the root 
 
 ```
 make
-./cks [input file path] [number of subgraphs]
+./cks [input file path] [number of subgraphs] [tex table row output file]
 ```
 
 The input parser reads `.gcc` (_graphs with conflict constraints_) and `.stp` (DIMACS _steiner tree problem_) formats automatically. See the files `input/*.gcc` for small examples. **N.B.** When using an `.stp` instance with edge weights (_e.g._ in the generalized maximum-weight connected subgraph benchmark), run the executable with an arbitrary additional argument (to inform the parser that such values should be ignored when solving the connected subpartition problem):
 ```
-./cks [stp file] [number of subgraphs] -e
+./cks [stp file] [number of subgraphs] [tex table row output file] -e
 ```
 
-Finally, when solving an instance of the convex recoloring problem, the number of subgraphs is determined from the given coloring. Moreover, we also expect an additional file containing the optimal solution value (to prepare a latex table output); this is done to conform with the dataset available in [](https://www.loco.ic.unicamp.br/files/instances/convex-recoloring/). In this case, set the `CONVEX_RECOLORING_INSTANCE` variable to true in the first few lines of `main.cpp`, compile again with `make`, and run the solver using
+Finally, when solving an instance of the convex recoloring problem, the number of subgraphs is determined from the given coloring. Moreover, we also expect an additional file containing the optimal solution value (to prepare a latex table output); this is done to conform with the dataset available in [https://www.loco.ic.unicamp.br/files/instances/convex-recoloring/](https://www.loco.ic.unicamp.br/files/instances/convex-recoloring/). In this case, set the `CONVEX_RECOLORING_INSTANCE` variable to true in the first few lines of `main.cpp`, compile again with `make`, and run the solver using
 ```
-./cks [cr file] [cr solution]
+./cks [cr file] [cr solution] [tex table row output file]
 ```
